@@ -30,6 +30,15 @@ const User = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false,
       defaultValue: "admin",
+      validate: {
+        isIn: [["admin", "staff"]],
+      },
+    },
+
+    isActive: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: true,
     },
   },
   {

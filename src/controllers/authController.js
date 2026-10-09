@@ -24,6 +24,12 @@ async function login(req, res) {
       });
     }
 
+    if (!user.isActive) {
+      return res.status(403).json({
+        message: "Akun Anda sedang dinonaktifkan",
+      });
+    }
+
     const passwordMatch = await bcrypt.compare(password, user.password);
 
     if (!passwordMatch) {
@@ -36,6 +42,7 @@ async function login(req, res) {
       {
         id: user.id,
         role: user.role,
+        isActive: user.isActive,
       },
       process.env.JWT_SECRET,
       {
@@ -51,6 +58,7 @@ async function login(req, res) {
         name: user.name,
         email: user.email,
         role: user.role,
+        isActive: user.isActive,
       },
     });
   } catch (error) {
