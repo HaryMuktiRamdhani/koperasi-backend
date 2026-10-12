@@ -38,6 +38,7 @@ async function create(req, res) {
       classId,
       jurusanId,
       generation,
+      status,
     } = req.body;
 
     if (!nis || !name || !classId || !jurusanId || !generation) {
@@ -52,6 +53,7 @@ async function create(req, res) {
       classId,
       jurusanId,
       generation,
+      ...(status ? { status } : {}),
     });
 
     res.status(201).json({
