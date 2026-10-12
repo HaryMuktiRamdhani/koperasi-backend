@@ -1,12 +1,32 @@
-const Class = require("../../models/Class");
+const { Class, Student } = require("../../models");
 
 async function getAll(req, res) {
   try {
     const data = await Class.findAll({
+      include: [
+        {
+          model: Student,
+          attributes: ["jurusanId"],
+          required: false,
+        },
+      ],
       order: [["name", "ASC"]],
     });
 
-    res.json(data);
+    res.json(
+      data.map((item) => {
+        const plainItem = item.toJSON();
+        const jurusanIds = [
+          ...new Set((plainItem.Students || []).map((student) => student.jurusanId)),
+        ];
+
+        delete plainItem.Students;
+        return {
+          ...plainItem,
+          jurusanIds,
+        };
+      }),
+    );
   } catch (error) {
     console.error(error);
 

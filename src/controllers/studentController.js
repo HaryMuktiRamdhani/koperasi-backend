@@ -4,6 +4,37 @@ const {
   Jurusan,
 } = require("../../models");
 
+async function validateClassJurusan(classId, jurusanId) {
+  const selectedClass = await Class.findByPk(classId, {
+    attributes: ["id"],
+  });
+
+  if (!selectedClass) {
+    return "Kelas tidak ditemukan.";
+  }
+
+  const selectedJurusan = await Jurusan.findByPk(jurusanId, {
+    attributes: ["id"],
+  });
+
+  if (!selectedJurusan) {
+    return "Jurusan tidak ditemukan.";
+  }
+
+  const existingRelations = await Student.findAll({
+    where: { classId },
+    attributes: ["jurusanId"],
+    raw: true,
+  });
+  const knownJurusanIds = new Set(existingRelations.map((student) => student.jurusanId));
+
+  if (knownJurusanIds.size > 0 && !knownJurusanIds.has(jurusanId)) {
+    return "Jurusan tidak sesuai dengan relasi yang sudah tersimpan untuk kelas ini.";
+  }
+
+  return null;
+}
+
 async function getAll(req, res) {
   try {
     const data = await Student.findAll({
@@ -47,6 +78,11 @@ async function create(req, res) {
       });
     }
 
+    const relationError = await validateClassJurusan(classId, jurusanId);
+    if (relationError) {
+      return res.status(400).json({ message: relationError });
+    }
+
     const data = await Student.create({
       nis,
       name,
@@ -77,6 +113,16 @@ async function update(req, res) {
       return res.status(404).json({
         message: "Siswa tidak ditemukan",
       });
+    }
+
+    if (req.body.classId || req.body.jurusanId) {
+      const relationError = await validateClassJurusan(
+        req.body.classId || data.classId,
+        req.body.jurusanId || data.jurusanId,
+      );
+      if (relationError) {
+        return res.status(400).json({ message: relationError });
+      }
     }
 
     await data.update(req.body);
