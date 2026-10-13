@@ -25,6 +25,11 @@ const Class = sequelize.define(
       allowNull: false,
     },
 
+    jurusanId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+
     status: {
       type: DataTypes.STRING,
       allowNull: false,

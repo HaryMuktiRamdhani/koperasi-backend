@@ -6,11 +6,15 @@ const {
 
 async function validateClassJurusan(classId, jurusanId) {
   const selectedClass = await Class.findByPk(classId, {
-    attributes: ["id"],
+    attributes: ["id", "jurusanId", "status"],
   });
 
   if (!selectedClass) {
     return "Kelas tidak ditemukan.";
+  }
+
+  if (selectedClass.status !== "Aktif") {
+    return "Kelas yang dipilih tidak berstatus Aktif.";
   }
 
   const selectedJurusan = await Jurusan.findByPk(jurusanId, {
@@ -19,6 +23,10 @@ async function validateClassJurusan(classId, jurusanId) {
 
   if (!selectedJurusan) {
     return "Jurusan tidak ditemukan.";
+  }
+
+  if (selectedClass.jurusanId && selectedClass.jurusanId !== jurusanId) {
+    return "Jurusan tidak sesuai dengan jurusan yang ditetapkan pada kelas ini.";
   }
 
   const existingRelations = await Student.findAll({
@@ -116,8 +124,19 @@ async function update(req, res) {
     }
 
     if (req.body.classId || req.body.jurusanId) {
+      const nextClassId = req.body.classId || data.classId;
+      const isChangingClass = nextClassId !== data.classId;
+      if (isChangingClass) {
+        const nextClass = await Class.findByPk(nextClassId, { attributes: ["status"] });
+        if (!nextClass) {
+          return res.status(400).json({ message: "Kelas tidak ditemukan." });
+        }
+        if (nextClass.status !== "Aktif") {
+          return res.status(400).json({ message: "Kelas yang dipilih tidak berstatus Aktif." });
+        }
+      }
       const relationError = await validateClassJurusan(
-        req.body.classId || data.classId,
+        nextClassId,
         req.body.jurusanId || data.jurusanId,
       );
       if (relationError) {

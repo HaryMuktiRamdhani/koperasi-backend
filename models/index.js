@@ -14,6 +14,14 @@ Class.hasMany(Student, {
   foreignKey: "classId",
 });
 
+Class.belongsTo(Jurusan, {
+  foreignKey: "jurusanId",
+});
+
+Jurusan.hasMany(Class, {
+  foreignKey: "jurusanId",
+});
+
 Student.belongsTo(Jurusan, {
   foreignKey: "jurusanId",
 });
