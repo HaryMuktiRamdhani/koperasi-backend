@@ -24,6 +24,14 @@ const Bill = sequelize.define(
       type: DataTypes.INTEGER,
       allowNull: false,
     },
+    billDate: {
+      type: DataTypes.DATEONLY,
+      allowNull: true,
+    },
+    dueDate: {
+      type: DataTypes.DATEONLY,
+      allowNull: true,
+    },
 
     status: {
       type: DataTypes.STRING,

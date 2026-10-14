@@ -1,6 +1,7 @@
 const Payment = require("../../models/Payment");
 const Bill = require("../../models/Bill");
 const User = require("../../models/User");
+const { Student, Item, Class, Jurusan } = require("../../models");
 
 async function getAll(req, res) {
   try {
@@ -8,6 +9,20 @@ async function getAll(req, res) {
       include: [
         {
           model: Bill,
+          include: [
+            {
+              model: Student,
+              attributes: ["id", "nis", "name", "classId", "jurusanId"],
+              include: [
+                { model: Class, attributes: ["id", "name", "level", "academicYear"] },
+                { model: Jurusan, attributes: ["id", "nama", "kode"] },
+              ],
+            },
+            {
+              model: Item,
+              attributes: ["id", "name", "price"],
+            },
+          ],
         },
         {
           model: User,
