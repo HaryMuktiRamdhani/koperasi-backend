@@ -24,6 +24,9 @@ const Item = sequelize.define(
       type: DataTypes.STRING,
       allowNull: false,
       defaultValue: "Aktif",
+      validate: {
+        isIn: [["Aktif", "Nonaktif", "Akan Datang"]],
+      },
     },
   },
   {

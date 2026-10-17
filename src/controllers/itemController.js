@@ -1,4 +1,9 @@
 const Item = require("../../models/Item");
+const ITEM_STATUSES = ["Aktif", "Nonaktif", "Akan Datang"];
+
+function validateStatus(status) {
+  return ITEM_STATUSES.includes(status) ? null : "Status barang tidak valid.";
+}
 
 async function getAll(req, res) {
   try {
@@ -18,17 +23,20 @@ async function getAll(req, res) {
 
 async function create(req, res) {
   try {
-    const { name, price } = req.body;
+    const { name, price, status = "Aktif" } = req.body;
 
     if (!name || price === undefined) {
       return res.status(400).json({
         message: "Nama dan harga wajib diisi",
       });
     }
+    const statusError = validateStatus(status);
+    if (statusError) return res.status(400).json({ message: statusError });
 
     const data = await Item.create({
       name,
       price,
+      status,
     });
 
     res.status(201).json({
@@ -54,7 +62,15 @@ async function update(req, res) {
       });
     }
 
-    await data.update(req.body);
+    const nextStatus = req.body.status === undefined ? (data.status || "Aktif") : req.body.status;
+    const statusError = validateStatus(nextStatus);
+    if (statusError) return res.status(400).json({ message: statusError });
+
+    await data.update({
+      ...(req.body.name !== undefined ? { name: req.body.name } : {}),
+      ...(req.body.price !== undefined ? { price: req.body.price } : {}),
+      status: nextStatus,
+    });
 
     res.json({
       message: "Barang berhasil diperbarui",
