@@ -27,6 +27,15 @@ const Jurusan = sequelize.define(
       allowNull: false,
       defaultValue: true,
     },
+
+    status: {
+      type: DataTypes.STRING,
+      allowNull: false,
+      defaultValue: "Aktif",
+      validate: {
+        isIn: [["Aktif", "Nonaktif", "Akan Datang"]],
+      },
+    },
   },
   {
     tableName: "jurusan",

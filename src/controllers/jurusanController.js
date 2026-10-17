@@ -1,4 +1,11 @@
 const Jurusan = require("../../models/Jurusan");
+const JURUSAN_STATUSES = ["Aktif", "Nonaktif", "Akan Datang"];
+
+function validateStatus(status) {
+  return JURUSAN_STATUSES.includes(status)
+    ? null
+    : "Status jurusan tidak valid.";
+}
 
 async function getAll(req, res) {
   try {
@@ -18,17 +25,20 @@ async function getAll(req, res) {
 
 async function create(req, res) {
   try {
-    const { nama, kode } = req.body;
+    const { nama, kode, status = "Aktif" } = req.body;
 
     if (!nama || !kode) {
       return res.status(400).json({
         message: "Nama dan kode wajib diisi",
       });
     }
+    const statusError = validateStatus(status);
+    if (statusError) return res.status(400).json({ message: statusError });
 
     const data = await Jurusan.create({
       nama,
       kode,
+      status,
     });
 
     res.status(201).json({
@@ -47,8 +57,6 @@ async function create(req, res) {
 async function update(req, res) {
   try {
     const { id } = req.params;
-    const { nama, kode, isActive } = req.body;
-
     const data = await Jurusan.findByPk(id);
 
     if (!data) {
@@ -57,10 +65,14 @@ async function update(req, res) {
       });
     }
 
+    const nextStatus = req.body.status === undefined ? (data.status || "Aktif") : req.body.status;
+    const statusError = validateStatus(nextStatus);
+    if (statusError) return res.status(400).json({ message: statusError });
+
     await data.update({
-      nama,
-      kode,
-      isActive,
+      ...(req.body.nama !== undefined ? { nama: req.body.nama } : {}),
+      ...(req.body.kode !== undefined ? { kode: req.body.kode } : {}),
+      status: nextStatus,
     });
 
     res.json({
