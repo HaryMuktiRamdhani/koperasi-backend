@@ -5,6 +5,7 @@ const Jurusan = require("./Jurusan");
 const Item = require("./Item");
 const Bill = require("./Bill");
 const Payment = require("./Payment");
+const Session = require("./Session");
 
 Student.belongsTo(Class, {
   foreignKey: "classId",
@@ -62,6 +63,9 @@ User.hasMany(Payment, {
   foreignKey: "userId",
 });
 
+User.hasMany(Session, { foreignKey: "userId" });
+Session.belongsTo(User, { foreignKey: "userId" });
+
 module.exports = {
   User,
   Student,
@@ -70,4 +74,5 @@ module.exports = {
   Item,
   Bill,
   Payment,
+  Session,
 };

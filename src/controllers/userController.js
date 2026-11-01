@@ -1,8 +1,8 @@
 const bcrypt = require("bcrypt");
 const { Op } = require("sequelize");
-const { User } = require("../../models");
+const { User, Session } = require("../../models");
 
-const publicAttributes = ["id", "name", "email", "role", "isActive", "createdAt", "updatedAt"];
+const publicAttributes = ["id", "name", "email", "role", "isActive", "username", "phone", "bio", "avatarUrl", "createdAt", "updatedAt"];
 
 function getUserPayload(body) {
   const name = typeof body.name === "string" ? body.name.trim() : "";
@@ -133,12 +133,22 @@ async function updateProfile(req, res) {
   try {
     const user = await User.findByPk(req.user.id);
     const { name, email } = getUserPayload(req.body);
+    const username = typeof req.body.username === "string" ? req.body.username.trim().toLowerCase() : "";
+    const phone = typeof req.body.phone === "string" ? req.body.phone.trim() : null;
+    const bio = typeof req.body.bio === "string" ? req.body.bio.trim() : null;
+    const avatarUrl = req.body.avatarUrl === null || typeof req.body.avatarUrl === "string" ? req.body.avatarUrl : undefined;
     if (!user || !name || !email) return res.status(400).json({ message: "Nama dan email wajib diisi" });
+    if (!/^[a-z0-9_]{3,30}$/.test(username)) return res.status(400).json({ message: "Username harus 3-30 karakter: huruf kecil, angka, atau garis bawah" });
+    if (phone && !/^[0-9+() -]{8,30}$/.test(phone)) return res.status(400).json({ message: "Nomor HP tidak valid" });
+    if (bio && bio.length > 500) return res.status(400).json({ message: "Bio maksimal 500 karakter" });
+    if (avatarUrl !== undefined && avatarUrl !== null && (!/^data:image\/(jpeg|png|webp);base64,/.test(avatarUrl) || Buffer.byteLength(avatarUrl, "utf8") > 2 * 1024 * 1024)) return res.status(400).json({ message: "Foto profil harus JPG, PNG, atau WebP dan maksimal 2MB" });
 
     const duplicate = await User.findOne({ where: { email, id: { [Op.ne]: user.id } } });
     if (duplicate) return res.status(409).json({ message: "Email sudah terdaftar" });
+    const usernameDuplicate = await User.findOne({ where: { username, id: { [Op.ne]: user.id } } });
+    if (usernameDuplicate) return res.status(409).json({ message: "Username sudah digunakan" });
 
-    await user.update({ name, email });
+    await user.update({ name, email, username, phone, bio, ...(avatarUrl !== undefined ? { avatarUrl } : {}) });
     return res.json({ message: "Profil berhasil diperbarui", data: await User.findByPk(user.id, { attributes: publicAttributes }) });
   } catch (error) {
     console.error("Update profile error:", error);
@@ -146,4 +156,46 @@ async function updateProfile(req, res) {
   }
 }
 
-module.exports = { getAll, create, update, updateStatus, getProfile, updateProfile };
+async function checkUsername(req, res) {
+  const username = typeof req.query.username === "string" ? req.query.username.trim().toLowerCase() : "";
+  if (!/^[a-z0-9_]{3,30}$/.test(username)) return res.json({ available: false, message: "Format username tidak valid" });
+  const user = await User.findOne({ where: { username, id: { [Op.ne]: req.user.id } }, attributes: ["id"] });
+  return res.json({ available: !user });
+}
+
+async function changePassword(req, res) {
+  const user = await User.findByPk(req.user.id);
+  const { currentPassword, newPassword, confirmPassword } = req.body;
+  if (!user || typeof currentPassword !== "string" || typeof newPassword !== "string" || newPassword !== confirmPassword) return res.status(400).json({ message: "Data password tidak valid" });
+  if (newPassword.length < 8) return res.status(400).json({ message: "Password minimal terdiri dari 8 karakter" });
+  if (!(await bcrypt.compare(currentPassword, user.password))) return res.status(400).json({ message: "Password lama salah" });
+  await user.update({ password: await bcrypt.hash(newPassword, 10) });
+  await Session.update({ revokedAt: new Date() }, { where: { userId: user.id, revokedAt: null } });
+  return res.json({ message: "Password berhasil diubah. Silakan login kembali." });
+}
+
+async function getSessions(req, res) {
+  const sessions = await Session.findAll({ where: { userId: req.user.id, revokedAt: null }, attributes: ["id", "userAgent", "ipAddress", "createdAt", "expiresAt"], order: [["createdAt", "DESC"]] });
+  return res.json(sessions);
+}
+
+async function revokeSession(req, res) {
+  await Session.update({ revokedAt: new Date() }, { where: { id: req.params.id, userId: req.user.id } });
+  return res.json({ message: "Sesi berhasil dikeluarkan" });
+}
+
+async function revokeAllSessions(req, res) {
+  await Session.update({ revokedAt: new Date() }, { where: { userId: req.user.id, revokedAt: null } });
+  return res.json({ message: "Semua sesi berhasil dikeluarkan" });
+}
+
+async function deleteAccount(req, res) {
+  const user = await User.findByPk(req.user.id);
+  if (!user || typeof req.body.username !== "string" || req.body.username.trim().toLowerCase() !== user.username) return res.status(400).json({ message: "Konfirmasi username tidak sesuai" });
+  if (typeof req.body.password !== "string" || !(await bcrypt.compare(req.body.password, user.password))) return res.status(401).json({ message: "Autentikasi ulang gagal" });
+  if (user.role === "admin" && await User.count({ where: { role: "admin", isActive: true } }) <= 1) return res.status(400).json({ message: "Akun merupakan satu-satunya admin aktif dan tidak dapat dihapus" });
+  await user.destroy();
+  return res.json({ message: "Akun berhasil dihapus" });
+}
+
+module.exports = { getAll, create, update, updateStatus, getProfile, updateProfile, checkUsername, changePassword, getSessions, revokeSession, revokeAllSessions, deleteAccount };

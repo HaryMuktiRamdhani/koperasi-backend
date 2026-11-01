@@ -40,6 +40,10 @@ const User = sequelize.define(
       allowNull: false,
       defaultValue: true,
     },
+    username: { type: DataTypes.STRING(50), allowNull: true, unique: true },
+    phone: { type: DataTypes.STRING(30), allowNull: true },
+    bio: { type: DataTypes.TEXT, allowNull: true },
+    avatarUrl: { type: DataTypes.TEXT, allowNull: true },
   },
   {
     tableName: "users",

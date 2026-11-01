@@ -1,6 +1,8 @@
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const User = require("../../models/User");
+const { Session } = require("../../models");
+const crypto = require("crypto");
 
 async function login(req, res) {
   try {
@@ -38,11 +40,16 @@ async function login(req, res) {
       });
     }
 
+    const jti = crypto.randomUUID();
+    const expiresIn = process.env.JWT_EXPIRES_IN || "1d";
+    const expiresAt = new Date(Date.now() + (expiresIn.endsWith("d") ? Number(expiresIn.slice(0, -1)) * 86400000 : 86400000));
+    await Session.create({ userId: user.id, jti, userAgent: req.get("user-agent"), ipAddress: req.ip, expiresAt });
     const token = jwt.sign(
       {
         id: user.id,
         role: user.role,
         isActive: user.isActive,
+        jti,
       },
       process.env.JWT_SECRET,
       {
@@ -59,6 +66,10 @@ async function login(req, res) {
         email: user.email,
         role: user.role,
         isActive: user.isActive,
+        username: user.username,
+        phone: user.phone,
+        bio: user.bio,
+        avatarUrl: user.avatarUrl,
       },
     });
   } catch (error) {
