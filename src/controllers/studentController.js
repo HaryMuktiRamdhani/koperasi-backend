@@ -69,6 +69,22 @@ async function getAll(req, res) {
   }
 }
 
+async function getById(req, res) {
+  try {
+    const data = await Student.findByPk(req.params.id, {
+      include: [
+        { model: Class, attributes: ["id", "name", "level", "academicYear"] },
+        { model: Jurusan, attributes: ["id", "nama", "kode"] },
+      ],
+    });
+    if (!data) return res.status(404).json({ message: "Siswa tidak ditemukan" });
+    return res.json(data);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: "Gagal mengambil detail siswa" });
+  }
+}
+
 async function create(req, res) {
   try {
     const {
@@ -185,6 +201,7 @@ async function remove(req, res) {
 
 module.exports = {
   getAll,
+  getById,
   create,
   update,
   remove,
