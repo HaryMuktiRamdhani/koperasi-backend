@@ -6,6 +6,7 @@ const Item = require("./Item");
 const Bill = require("./Bill");
 const Payment = require("./Payment");
 const Session = require("./Session");
+const CooperativeProfile = require("./CooperativeProfile");
 
 Student.belongsTo(Class, {
   foreignKey: "classId",
@@ -75,4 +76,5 @@ module.exports = {
   Bill,
   Payment,
   Session,
+  CooperativeProfile,
 };

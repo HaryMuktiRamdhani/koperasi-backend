@@ -12,8 +12,10 @@ const dashboardRoutes = require("./routes/dashboardRoutes");
 const userRoutes = require("./routes/userRoutes");
 const searchRoutes = require("./routes/searchRoutes");
 const notificationRoutes = require("./routes/notificationRoutes");
+const cooperativeRoutes = require("./routes/cooperativeRoutes");
 const userController = require("./controllers/userController");
 const cors = require("cors");
+const path = require("path");
 
 const authenticateToken = require("./middleware/authMiddleware");
 const requireRole = require("./middleware/roleMiddleware");
@@ -22,7 +24,8 @@ const app = express();
 app.use(cors());
 const PORT = process.env.PORT || 5001;
 
-app.use(express.json());
+app.use(express.json({ limit: "4mb" }));
+app.use("/uploads", express.static(path.resolve(__dirname, "../uploads")));
 
 app.get("/api/health", (req, res) => {
   res.json({
@@ -36,6 +39,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/dashboard", authenticateToken, dashboardRoutes);
 app.use("/api/search", authenticateToken, searchRoutes);
 app.use("/api/notifications", authenticateToken, notificationRoutes);
+app.use("/api/cooperative-profile", authenticateToken, cooperativeRoutes);
 app.use("/api/users", authenticateToken, requireRole("admin"), userRoutes);
 app.get("/api/profile", authenticateToken, userController.getProfile);
 app.patch("/api/profile", authenticateToken, userController.updateProfile);
