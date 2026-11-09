@@ -22,7 +22,7 @@ async function getDashboard(req, res) {
       totalBills,
       paidBills,
       unpaidBills,
-      totalIncome: Number(income.total),
+      totalIncome: Number(income?.total || 0),
     });
   } catch (error) {
     console.error("Dashboard error:", error);

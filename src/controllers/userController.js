@@ -1,6 +1,8 @@
 const bcrypt = require("bcrypt");
 const { Op } = require("sequelize");
 const { User, Session } = require("../../models");
+const { getPolicyRow } = require("./securityController");
+const { validatePassword } = require("../utils/passwordPolicy");
 
 const publicAttributes = ["id", "name", "email", "role", "isActive", "username", "phone", "bio", "avatarUrl", "createdAt", "updatedAt"];
 
@@ -49,9 +51,8 @@ async function create(req, res) {
       return res.status(400).json({ message: "Nama, email, password, dan role wajib diisi" });
     }
 
-    if (password.length < 8) {
-      return res.status(400).json({ message: "Password minimal terdiri dari 8 karakter" });
-    }
+    const policyError = validatePassword(password, await getPolicyRow());
+    if (policyError) return res.status(400).json({ message: policyError });
 
     const existing = await User.findOne({ where: { email } });
     if (existing) return res.status(409).json({ message: "Email sudah terdaftar" });
@@ -87,12 +88,16 @@ async function update(req, res) {
     if (user.id === req.user.id && role !== user.role) {
       return res.status(400).json({ message: "Role akun sendiri tidak dapat diubah" });
     }
-    if (password && password.length < 8) {
-      return res.status(400).json({ message: "Password minimal terdiri dari 8 karakter" });
+    if (password) {
+      const policyError = validatePassword(password, await getPolicyRow());
+      if (policyError) return res.status(400).json({ message: policyError });
     }
 
     const updates = { name, email, role };
-    if (password) updates.password = await bcrypt.hash(password, 10);
+    if (password) {
+      updates.password = await bcrypt.hash(password, 10);
+      updates.passwordChangedAt = new Date();
+    }
     await user.update(updates);
 
     return res.json({ message: "Pengguna berhasil diperbarui", data: await User.findByPk(user.id, { attributes: publicAttributes }) });
@@ -167,26 +172,50 @@ async function changePassword(req, res) {
   const user = await User.findByPk(req.user.id);
   const { currentPassword, newPassword, confirmPassword } = req.body;
   if (!user || typeof currentPassword !== "string" || typeof newPassword !== "string" || newPassword !== confirmPassword) return res.status(400).json({ message: "Data password tidak valid" });
-  if (newPassword.length < 8) return res.status(400).json({ message: "Password minimal terdiri dari 8 karakter" });
+  const policyError = validatePassword(newPassword, await getPolicyRow());
+  if (policyError) return res.status(400).json({ message: policyError });
   if (!(await bcrypt.compare(currentPassword, user.password))) return res.status(400).json({ message: "Password lama salah" });
-  await user.update({ password: await bcrypt.hash(newPassword, 10) });
-  await Session.update({ revokedAt: new Date() }, { where: { userId: user.id, revokedAt: null } });
+  await user.update({ password: await bcrypt.hash(newPassword, 10), passwordChangedAt: new Date() });
+  const endedAt = new Date();
+  await Session.update({ revokedAt: endedAt, status: "revoked", endedAt }, { where: { userId: user.id, revokedAt: null, status: "active" } });
   return res.json({ message: "Password berhasil diubah. Silakan login kembali." });
 }
 
 async function getSessions(req, res) {
-  const sessions = await Session.findAll({ where: { userId: req.user.id, revokedAt: null }, attributes: ["id", "userAgent", "ipAddress", "createdAt", "expiresAt"], order: [["createdAt", "DESC"]] });
-  return res.json(sessions);
+  const user = await User.findByPk(req.user.id, { attributes: ["id", "name", "username", "email", "avatarUrl"] });
+  const sessions = await Session.findAll({
+    where: { userId: req.user.id, revokedAt: null, status: "active" },
+    attributes: ["id", "jti", "deviceName", "browser", "operatingSystem", "ipAddress", "createdAt", "lastActivityAt", "expiresAt", "status"],
+    order: [["createdAt", "DESC"]],
+  });
+  return res.json({ user, sessions: sessions.map((session) => ({ ...session.toJSON(), isCurrent: session.jti === req.auth.jti })) });
 }
 
 async function revokeSession(req, res) {
-  await Session.update({ revokedAt: new Date() }, { where: { id: req.params.id, userId: req.user.id } });
+  const endedAt = new Date();
+  await Session.update({ revokedAt: endedAt, status: "revoked", endedAt }, { where: { id: req.params.id, userId: req.user.id, status: "active" } });
   return res.json({ message: "Sesi berhasil dikeluarkan" });
 }
 
 async function revokeAllSessions(req, res) {
-  await Session.update({ revokedAt: new Date() }, { where: { userId: req.user.id, revokedAt: null } });
-  return res.json({ message: "Semua sesi berhasil dikeluarkan" });
+  const endedAt = new Date();
+  await Session.update({ revokedAt: endedAt, status: "revoked", endedAt }, { where: { userId: req.user.id, revokedAt: null, status: "active", jti: { [Op.ne]: req.auth.jti } } });
+  return res.json({ message: "Semua sesi perangkat lain berhasil dikeluarkan" });
+}
+
+async function getSessionHistory(req, res) {
+  const sessions = await Session.findAll({
+    where: { userId: req.user.id, [Op.or]: [{ status: { [Op.ne]: "active" } }, { revokedAt: { [Op.ne]: null } }] },
+    attributes: ["id", "deviceName", "browser", "operatingSystem", "ipAddress", "createdAt", "lastActivityAt", "endedAt", "status"],
+    order: [["endedAt", "DESC"], ["createdAt", "DESC"]],
+  });
+  return res.json(sessions);
+}
+
+async function logoutCurrent(req, res) {
+  const endedAt = new Date();
+  await Session.update({ revokedAt: endedAt, status: "revoked", endedAt }, { where: { jti: req.auth.jti, userId: req.user.id, status: "active" } });
+  return res.json({ message: "Logout berhasil" });
 }
 
 async function deleteAccount(req, res) {
@@ -198,4 +227,4 @@ async function deleteAccount(req, res) {
   return res.json({ message: "Akun berhasil dihapus" });
 }
 
-module.exports = { getAll, create, update, updateStatus, getProfile, updateProfile, checkUsername, changePassword, getSessions, revokeSession, revokeAllSessions, deleteAccount };
+module.exports = { getAll, create, update, updateStatus, getProfile, updateProfile, checkUsername, changePassword, getSessions, getSessionHistory, revokeSession, revokeAllSessions, logoutCurrent, deleteAccount };

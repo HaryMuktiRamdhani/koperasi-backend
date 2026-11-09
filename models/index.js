@@ -7,6 +7,10 @@ const Bill = require("./Bill");
 const Payment = require("./Payment");
 const Session = require("./Session");
 const CooperativeProfile = require("./CooperativeProfile");
+const UserSecuritySettings = require("./UserSecuritySettings");
+const SystemSecuritySettings = require("./SystemSecuritySettings");
+const RecoveryCode = require("./RecoveryCode");
+const LoginHistory = require("./LoginHistory");
 
 Student.belongsTo(Class, {
   foreignKey: "classId",
@@ -66,6 +70,12 @@ User.hasMany(Payment, {
 
 User.hasMany(Session, { foreignKey: "userId" });
 Session.belongsTo(User, { foreignKey: "userId" });
+User.hasOne(UserSecuritySettings, { foreignKey: "userId" });
+UserSecuritySettings.belongsTo(User, { foreignKey: "userId" });
+User.hasMany(RecoveryCode, { foreignKey: "userId" });
+RecoveryCode.belongsTo(User, { foreignKey: "userId" });
+User.hasMany(LoginHistory, { foreignKey: "userId" });
+LoginHistory.belongsTo(User, { foreignKey: "userId" });
 
 module.exports = {
   User,
@@ -77,4 +87,8 @@ module.exports = {
   Payment,
   Session,
   CooperativeProfile,
+  UserSecuritySettings,
+  SystemSecuritySettings,
+  RecoveryCode,
+  LoginHistory,
 };

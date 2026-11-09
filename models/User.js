@@ -44,6 +44,12 @@ const User = sequelize.define(
     phone: { type: DataTypes.STRING(30), allowNull: true },
     bio: { type: DataTypes.TEXT, allowNull: true },
     avatarUrl: { type: DataTypes.TEXT, allowNull: true },
+    totpSecretEnc: { type: DataTypes.TEXT, allowNull: true, field: "totp_secret_enc" },
+    totpEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false, field: "totp_enabled" },
+    totpConfirmedAt: { type: DataTypes.DATE, allowNull: true, field: "totp_confirmed_at" },
+    failedLoginCount: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0, field: "failed_login_count" },
+    lockedUntil: { type: DataTypes.DATE, allowNull: true, field: "locked_until" },
+    passwordChangedAt: { type: DataTypes.DATE, allowNull: true, field: "password_changed_at" },
   },
   {
     tableName: "users",
