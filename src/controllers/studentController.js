@@ -4,6 +4,8 @@ const {
   Jurusan,
 } = require("../../models");
 
+const STUDENT_STATUSES = ["Aktif", "Lulus", "Pindah", "Keluar"];
+
 async function validateClassJurusan(classId, jurusanId) {
   const selectedClass = await Class.findByPk(classId, {
     attributes: ["id", "jurusanId", "status"],
@@ -96,10 +98,18 @@ async function create(req, res) {
       status,
     } = req.body;
 
-    if (!nis || !name || !classId || !jurusanId || !generation) {
+    const normalizedNis = typeof nis === "string" ? nis.trim() : "";
+    const normalizedName = typeof name === "string" ? name.trim() : "";
+    const normalizedGeneration = typeof generation === "string" ? generation.trim() : "";
+    const normalizedStatus = status || "Aktif";
+
+    if (!normalizedNis || !normalizedName || !classId || !jurusanId || !normalizedGeneration) {
       return res.status(400).json({
         message: "Data siswa belum lengkap",
       });
+    }
+    if (!STUDENT_STATUSES.includes(normalizedStatus)) {
+      return res.status(400).json({ message: "Status siswa tidak valid." });
     }
 
     const relationError = await validateClassJurusan(classId, jurusanId);
@@ -108,12 +118,12 @@ async function create(req, res) {
     }
 
     const data = await Student.create({
-      nis,
-      name,
+      nis: normalizedNis,
+      name: normalizedName,
       classId,
       jurusanId,
-      generation,
-      ...(status ? { status } : {}),
+      generation: normalizedGeneration,
+      status: normalizedStatus,
     });
 
     res.status(201).json({
@@ -122,6 +132,18 @@ async function create(req, res) {
     });
   } catch (error) {
     console.error(error);
+
+    if (error.name === "SequelizeUniqueConstraintError") {
+      return res.status(409).json({
+        message: "NIS sudah digunakan oleh siswa lain.",
+      });
+    }
+
+    if (error.name === "SequelizeForeignKeyConstraintError") {
+      return res.status(400).json({
+        message: "Kelas atau jurusan yang dipilih tidak valid.",
+      });
+    }
 
     res.status(500).json({
       message: "Gagal menambahkan siswa",
