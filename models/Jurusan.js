@@ -40,7 +40,7 @@ const Jurusan = sequelize.define(
   {
     tableName: "jurusan",
     timestamps: true,
-  }
+  },
 );
 
 module.exports = Jurusan;

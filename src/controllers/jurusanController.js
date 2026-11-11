@@ -65,7 +65,8 @@ async function update(req, res) {
       });
     }
 
-    const nextStatus = req.body.status === undefined ? (data.status || "Aktif") : req.body.status;
+    const nextStatus =
+      req.body.status === undefined ? data.status || "Aktif" : req.body.status;
     const statusError = validateStatus(nextStatus);
     if (statusError) return res.status(400).json({ message: statusError });
 

@@ -27,9 +27,20 @@ async function getAll(req, res) {
       include: [
         {
           model: Student,
-          attributes: ["id", "nis", "name", "generation", "status", "classId", "jurusanId"],
+          attributes: [
+            "id",
+            "nis",
+            "name",
+            "generation",
+            "status",
+            "classId",
+            "jurusanId",
+          ],
           include: [
-            { model: Class, attributes: ["id", "name", "level", "academicYear", "jurusanId"] },
+            {
+              model: Class,
+              attributes: ["id", "name", "level", "academicYear", "jurusanId"],
+            },
             { model: Jurusan, attributes: ["id", "nama", "kode"] },
           ],
         },
@@ -53,7 +64,13 @@ async function getAll(req, res) {
 
 async function create(req, res) {
   try {
-    const { studentId, itemId, amount, billDate = null, dueDate = null } = req.body;
+    const {
+      studentId,
+      itemId,
+      amount,
+      billDate = null,
+      dueDate = null,
+    } = req.body;
 
     if (!studentId || !itemId || amount === undefined) {
       return res.status(400).json({
@@ -62,7 +79,8 @@ async function create(req, res) {
     }
 
     const validationError = validateBillInput({ amount, billDate, dueDate });
-    if (validationError) return res.status(400).json({ message: validationError });
+    if (validationError)
+      return res.status(400).json({ message: validationError });
 
     const student = await Student.findByPk(studentId);
 
@@ -121,20 +139,26 @@ async function update(req, res) {
       studentId: req.body.studentId || data.studentId,
       itemId: req.body.itemId || data.itemId,
       amount: req.body.amount ?? data.amount,
-      billDate: req.body.billDate === undefined ? data.billDate : req.body.billDate,
+      billDate:
+        req.body.billDate === undefined ? data.billDate : req.body.billDate,
       dueDate: req.body.dueDate === undefined ? data.dueDate : req.body.dueDate,
     };
     const validationError = validateBillInput(nextValues);
-    if (validationError) return res.status(400).json({ message: validationError });
+    if (validationError)
+      return res.status(400).json({ message: validationError });
     if (!nextValues.studentId || !nextValues.itemId) {
-      return res.status(400).json({ message: "Siswa dan barang wajib dipilih." });
+      return res
+        .status(400)
+        .json({ message: "Siswa dan barang wajib dipilih." });
     }
     const [student, item] = await Promise.all([
       Student.findByPk(nextValues.studentId),
       Item.findByPk(nextValues.itemId),
     ]);
-    if (!student) return res.status(404).json({ message: "Siswa tidak ditemukan" });
-    if (!item) return res.status(404).json({ message: "Barang tidak ditemukan" });
+    if (!student)
+      return res.status(404).json({ message: "Siswa tidak ditemukan" });
+    if (!item)
+      return res.status(404).json({ message: "Barang tidak ditemukan" });
 
     await data.update(nextValues);
 
@@ -152,63 +176,91 @@ async function update(req, res) {
 }
 
 async function createBulk(req, res) {
-    const { studentIds, itemId, amount, billDate = null, dueDate = null } = req.body;
-    if (!Array.isArray(studentIds) || studentIds.length === 0 || !itemId || amount === undefined) {
-      return res.status(400).json({ message: "Pilih minimal satu siswa, barang, dan nominal tagihan." });
-    }
-    const uniqueStudentIds = [...new Set(studentIds)];
-    if (uniqueStudentIds.length !== studentIds.length) {
-      return res.status(400).json({ message: "Daftar siswa mengandung pilihan duplikat." });
-    }
-    const validationError = validateBillInput({ amount, billDate, dueDate });
-    if (validationError) return res.status(400).json({ message: validationError });
+  const {
+    studentIds,
+    itemId,
+    amount,
+    billDate = null,
+    dueDate = null,
+  } = req.body;
+  if (
+    !Array.isArray(studentIds) ||
+    studentIds.length === 0 ||
+    !itemId ||
+    amount === undefined
+  ) {
+    return res
+      .status(400)
+      .json({
+        message: "Pilih minimal satu siswa, barang, dan nominal tagihan.",
+      });
+  }
+  const uniqueStudentIds = [...new Set(studentIds)];
+  if (uniqueStudentIds.length !== studentIds.length) {
+    return res
+      .status(400)
+      .json({ message: "Daftar siswa mengandung pilihan duplikat." });
+  }
+  const validationError = validateBillInput({ amount, billDate, dueDate });
+  if (validationError)
+    return res.status(400).json({ message: validationError });
 
-    const transaction = await sequelize.transaction();
-    try {
-      const [students, item] = await Promise.all([
-        Student.findAll({ where: { id: uniqueStudentIds, status: "Aktif" }, transaction }),
-        Item.findByPk(itemId, { transaction }),
-      ]);
-      if (!item) {
-        await transaction.rollback();
-        return res.status(404).json({ message: "Barang tidak ditemukan" });
-      }
-      if (students.length !== uniqueStudentIds.length) {
-        await transaction.rollback();
-        return res.status(400).json({ message: "Semua siswa harus ditemukan dan berstatus Aktif." });
-      }
-
-      const existing = await Bill.findAll({
-        where: { studentId: uniqueStudentIds, itemId },
-        attributes: ["studentId"],
+  const transaction = await sequelize.transaction();
+  try {
+    const [students, item] = await Promise.all([
+      Student.findAll({
+        where: { id: uniqueStudentIds, status: "Aktif" },
         transaction,
-      });
-      if (existing.length > 0) {
-        await transaction.rollback();
-        return res.status(409).json({ message: "Sebagian siswa sudah memiliki tagihan untuk barang tersebut." });
-      }
-
-      const rows = await Bill.bulkCreate(
-        uniqueStudentIds.map((studentId) => ({
-          studentId,
-          itemId,
-          amount: Number(amount),
-          billDate,
-          dueDate,
-          status: "Belum Bayar",
-        })),
-        { transaction },
-      );
-      await transaction.commit();
-      return res.status(201).json({
-        message: `${rows.length} tagihan berhasil dibuat`,
-        data: rows,
-        count: rows.length,
-      });
-    } catch (error) {
+      }),
+      Item.findByPk(itemId, { transaction }),
+    ]);
+    if (!item) {
       await transaction.rollback();
-      console.error(error);
-      return res.status(500).json({ message: "Gagal membuat tagihan massal" });
+      return res.status(404).json({ message: "Barang tidak ditemukan" });
+    }
+    if (students.length !== uniqueStudentIds.length) {
+      await transaction.rollback();
+      return res
+        .status(400)
+        .json({ message: "Semua siswa harus ditemukan dan berstatus Aktif." });
+    }
+
+    const existing = await Bill.findAll({
+      where: { studentId: uniqueStudentIds, itemId },
+      attributes: ["studentId"],
+      transaction,
+    });
+    if (existing.length > 0) {
+      await transaction.rollback();
+      return res
+        .status(409)
+        .json({
+          message:
+            "Sebagian siswa sudah memiliki tagihan untuk barang tersebut.",
+        });
+    }
+
+    const rows = await Bill.bulkCreate(
+      uniqueStudentIds.map((studentId) => ({
+        studentId,
+        itemId,
+        amount: Number(amount),
+        billDate,
+        dueDate,
+        status: "Belum Bayar",
+      })),
+      { transaction },
+    );
+    await transaction.commit();
+    return res.status(201).json({
+      message: `${rows.length} tagihan berhasil dibuat`,
+      data: rows,
+      count: rows.length,
+    });
+  } catch (error) {
+    await transaction.rollback();
+    console.error(error);
+    return res.status(500).json({ message: "Gagal membuat tagihan massal" });
   }
 }
 

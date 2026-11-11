@@ -39,7 +39,7 @@ const Class = sequelize.define(
   {
     tableName: "classes",
     timestamps: true,
-  }
+  },
 );
 
 module.exports = Class;

@@ -10,6 +10,9 @@ router.put("/policy", requireRole("admin"), controller.updatePolicy);
 router.post("/2fa/setup", controller.setup2fa);
 router.post("/2fa/verify-enable", controller.verifyEnable2fa);
 router.post("/2fa/disable", controller.disable2fa);
-router.post("/2fa/recovery-codes/regenerate", controller.regenerateRecoveryCodes);
+router.post(
+  "/2fa/recovery-codes/regenerate",
+  controller.regenerateRecoveryCodes,
+);
 router.get("/login-history", controller.loginHistory);
 module.exports = router;

@@ -1,8 +1,5 @@
 const Student = require("../../models/Student");
-const {
-  Class,
-  Jurusan,
-} = require("../../models");
+const { Class, Jurusan } = require("../../models");
 
 const STUDENT_STATUSES = ["Aktif", "Lulus", "Pindah", "Keluar"];
 
@@ -36,7 +33,9 @@ async function validateClassJurusan(classId, jurusanId) {
     attributes: ["jurusanId"],
     raw: true,
   });
-  const knownJurusanIds = new Set(existingRelations.map((student) => student.jurusanId));
+  const knownJurusanIds = new Set(
+    existingRelations.map((student) => student.jurusanId),
+  );
 
   if (knownJurusanIds.size > 0 && !knownJurusanIds.has(jurusanId)) {
     return "Jurusan tidak sesuai dengan relasi yang sudah tersimpan untuk kelas ini.";
@@ -79,7 +78,8 @@ async function getById(req, res) {
         { model: Jurusan, attributes: ["id", "nama", "kode"] },
       ],
     });
-    if (!data) return res.status(404).json({ message: "Siswa tidak ditemukan" });
+    if (!data)
+      return res.status(404).json({ message: "Siswa tidak ditemukan" });
     return res.json(data);
   } catch (error) {
     console.error(error);
@@ -89,21 +89,21 @@ async function getById(req, res) {
 
 async function create(req, res) {
   try {
-    const {
-      nis,
-      name,
-      classId,
-      jurusanId,
-      generation,
-      status,
-    } = req.body;
+    const { nis, name, classId, jurusanId, generation, status } = req.body;
 
     const normalizedNis = typeof nis === "string" ? nis.trim() : "";
     const normalizedName = typeof name === "string" ? name.trim() : "";
-    const normalizedGeneration = typeof generation === "string" ? generation.trim() : "";
+    const normalizedGeneration =
+      typeof generation === "string" ? generation.trim() : "";
     const normalizedStatus = status || "Aktif";
 
-    if (!normalizedNis || !normalizedName || !classId || !jurusanId || !normalizedGeneration) {
+    if (
+      !normalizedNis ||
+      !normalizedName ||
+      !classId ||
+      !jurusanId ||
+      !normalizedGeneration
+    ) {
       return res.status(400).json({
         message: "Data siswa belum lengkap",
       });
@@ -165,12 +165,16 @@ async function update(req, res) {
       const nextClassId = req.body.classId || data.classId;
       const isChangingClass = nextClassId !== data.classId;
       if (isChangingClass) {
-        const nextClass = await Class.findByPk(nextClassId, { attributes: ["status"] });
+        const nextClass = await Class.findByPk(nextClassId, {
+          attributes: ["status"],
+        });
         if (!nextClass) {
           return res.status(400).json({ message: "Kelas tidak ditemukan." });
         }
         if (nextClass.status !== "Aktif") {
-          return res.status(400).json({ message: "Kelas yang dipilih tidak berstatus Aktif." });
+          return res
+            .status(400)
+            .json({ message: "Kelas yang dipilih tidak berstatus Aktif." });
         }
       }
       const relationError = await validateClassJurusan(

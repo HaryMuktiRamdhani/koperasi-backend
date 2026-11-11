@@ -3,16 +3,21 @@ const { Class, Student, Jurusan } = require("../../models");
 const CLASS_STATUSES = ["Aktif", "Akan datang", "Nonaktif", "Lulus/Arsip"];
 
 function parseAcademicYear(value) {
-  const match = typeof value === "string" ? value.match(/^(\d{4})\/(\d{4})$/) : null;
+  const match =
+    typeof value === "string" ? value.match(/^(\d{4})\/(\d{4})$/) : null;
   return match ? { start: Number(match[1]), end: Number(match[2]) } : null;
 }
 
 function validateClassInput({ level, jurusanId, name, academicYear, status }) {
-  if (!["X", "XI", "XII"].includes(level)) return "Tingkat harus X, XI, atau XII.";
-  if (!jurusanId || !name || !academicYear) return "Nama, tingkat, jurusan, dan tahun ajaran wajib diisi.";
-  if (status && !CLASS_STATUSES.includes(status)) return "Status kelas tidak valid.";
+  if (!["X", "XI", "XII"].includes(level))
+    return "Tingkat harus X, XI, atau XII.";
+  if (!jurusanId || !name || !academicYear)
+    return "Nama, tingkat, jurusan, dan tahun ajaran wajib diisi.";
+  if (status && !CLASS_STATUSES.includes(status))
+    return "Status kelas tidak valid.";
   const years = parseAcademicYear(academicYear);
-  if (!years || years.end <= years.start) return "Format tahun ajaran harus YYYY/YYYY dan tahun selesai harus lebih besar.";
+  if (!years || years.end <= years.start)
+    return "Format tahun ajaran harus YYYY/YYYY dan tahun selesai harus lebih besar.";
   return null;
 }
 
@@ -38,7 +43,9 @@ async function getAll(req, res) {
       data.map((item) => {
         const plainItem = item.toJSON();
         const jurusanIds = [
-          ...new Set((plainItem.Students || []).map((student) => student.jurusanId)),
+          ...new Set(
+            (plainItem.Students || []).map((student) => student.jurusanId),
+          ),
         ];
 
         delete plainItem.Students;
@@ -62,7 +69,13 @@ async function create(req, res) {
   try {
     const { name, level, jurusanId, academicYear, status = "Aktif" } = req.body;
 
-    const validationError = validateClassInput({ name, level, jurusanId, academicYear, status });
+    const validationError = validateClassInput({
+      name,
+      level,
+      jurusanId,
+      academicYear,
+      status,
+    });
     if (validationError) {
       return res.status(400).json({
         message: validationError,

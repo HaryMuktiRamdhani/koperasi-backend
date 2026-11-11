@@ -6,12 +6,17 @@ async function getNotifications(req, res) {
     const [unpaidBills, recentPayments] = await Promise.all([
       Bill.findAll({
         where: { status: { [Op.ne]: "Lunas" } },
-        include: [{ model: Student, attributes: ["name"] }, { model: Item, attributes: ["name"] }],
+        include: [
+          { model: Student, attributes: ["name"] },
+          { model: Item, attributes: ["name"] },
+        ],
         order: [["createdAt", "DESC"]],
         limit: 10,
       }),
       Payment.findAll({
-        include: [{ model: Bill, include: [{ model: Student, attributes: ["name"] }] }],
+        include: [
+          { model: Bill, include: [{ model: Student, attributes: ["name"] }] },
+        ],
         order: [["createdAt", "DESC"]],
         limit: 10,
       }),

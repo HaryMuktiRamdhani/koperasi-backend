@@ -42,7 +42,7 @@ const Bill = sequelize.define(
   {
     tableName: "bills",
     timestamps: true,
-  }
+  },
 );
 
 module.exports = Bill;

@@ -14,7 +14,10 @@ async function getAll(req, res) {
               model: Student,
               attributes: ["id", "nis", "name", "classId", "jurusanId"],
               include: [
-                { model: Class, attributes: ["id", "name", "level", "academicYear"] },
+                {
+                  model: Class,
+                  attributes: ["id", "name", "level", "academicYear"],
+                },
                 { model: Jurusan, attributes: ["id", "nama", "kode"] },
               ],
             },
@@ -44,20 +47,9 @@ async function getAll(req, res) {
 
 async function create(req, res) {
   try {
-    const {
-      billId,
-      amount,
-      paymentMethod,
-      paymentDate,
-      notes,
-    } = req.body;
+    const { billId, amount, paymentMethod, paymentDate, notes } = req.body;
 
-    if (
-      !billId ||
-      amount === undefined ||
-      !paymentMethod ||
-      !paymentDate
-    ) {
+    if (!billId || amount === undefined || !paymentMethod || !paymentDate) {
       return res.status(400).json({
         message: "Data pembayaran belum lengkap",
       });
