@@ -44,11 +44,15 @@ async function getAll(req, res) {
 async function create(req, res) {
   try {
     const { name, email } = getUserPayload(req.body);
+    const username = typeof req.body.username === "string" ? req.body.username.trim().toLowerCase() : "";
     const password = typeof req.body.password === "string" ? req.body.password : "";
     const role = req.body.role === "staff" ? "staff" : req.body.role === "admin" ? "admin" : "";
 
-    if (!name || !email || !password || !role) {
-      return res.status(400).json({ message: "Nama, email, password, dan role wajib diisi" });
+    if (!name || !email || !username || !password || !role) {
+      return res.status(400).json({ message: "Nama, username, email, password, dan role wajib diisi" });
+    }
+    if (!/^[a-z0-9_]{3,30}$/.test(username)) {
+      return res.status(400).json({ message: "Username harus 3-30 karakter: huruf kecil, angka, atau garis bawah" });
     }
 
     const policyError = validatePassword(password, await getPolicyRow());
@@ -56,9 +60,12 @@ async function create(req, res) {
 
     const existing = await User.findOne({ where: { email } });
     if (existing) return res.status(409).json({ message: "Email sudah terdaftar" });
+    const existingUsername = await User.findOne({ where: { username } });
+    if (existingUsername) return res.status(409).json({ message: "Username sudah digunakan" });
 
     const user = await User.create({
       name,
+      username,
       email,
       role,
       password: await bcrypt.hash(password, 10),
@@ -78,13 +85,17 @@ async function update(req, res) {
     if (!user) return res.status(404).json({ message: "Pengguna tidak ditemukan" });
 
     const { name, email } = getUserPayload(req.body);
+    const username = typeof req.body.username === "string" ? req.body.username.trim().toLowerCase() : user.username;
     const role = req.body.role === "staff" || req.body.role === "admin" ? req.body.role : user.role;
     const password = typeof req.body.password === "string" ? req.body.password : "";
 
-    if (!name || !email) return res.status(400).json({ message: "Nama dan email wajib diisi" });
+    if (!name || !email || !username) return res.status(400).json({ message: "Nama, username, dan email wajib diisi" });
+    if (!/^[a-z0-9_]{3,30}$/.test(username)) return res.status(400).json({ message: "Username harus 3-30 karakter: huruf kecil, angka, atau garis bawah" });
 
     const duplicate = await User.findOne({ where: { email, id: { [Op.ne]: user.id } } });
     if (duplicate) return res.status(409).json({ message: "Email sudah terdaftar" });
+    const usernameDuplicate = await User.findOne({ where: { username, id: { [Op.ne]: user.id } } });
+    if (usernameDuplicate) return res.status(409).json({ message: "Username sudah digunakan" });
     if (user.id === req.user.id && role !== user.role) {
       return res.status(400).json({ message: "Role akun sendiri tidak dapat diubah" });
     }
@@ -93,7 +104,7 @@ async function update(req, res) {
       if (policyError) return res.status(400).json({ message: policyError });
     }
 
-    const updates = { name, email, role };
+    const updates = { name, username, email, role };
     if (password) {
       updates.password = await bcrypt.hash(password, 10);
       updates.passwordChangedAt = new Date();
@@ -146,7 +157,7 @@ async function updateProfile(req, res) {
     if (!/^[a-z0-9_]{3,30}$/.test(username)) return res.status(400).json({ message: "Username harus 3-30 karakter: huruf kecil, angka, atau garis bawah" });
     if (phone && !/^[0-9+() -]{8,30}$/.test(phone)) return res.status(400).json({ message: "Nomor HP tidak valid" });
     if (bio && bio.length > 500) return res.status(400).json({ message: "Bio maksimal 500 karakter" });
-    if (avatarUrl !== undefined && avatarUrl !== null && (!/^data:image\/(jpeg|png|webp);base64,/.test(avatarUrl) || Buffer.byteLength(avatarUrl, "utf8") > 2 * 1024 * 1024)) return res.status(400).json({ message: "Foto profil harus JPG, PNG, atau WebP dan maksimal 2MB" });
+    if (avatarUrl !== undefined && avatarUrl !== null && (!/^data:image\/(jpeg|png|webp);base64,/.test(avatarUrl) || Buffer.byteLength(avatarUrl, "utf8") > 5 * 1024 * 1024)) return res.status(400).json({ message: "Foto profil harus JPG, PNG, atau WebP dan maksimal 5MB" });
 
     const duplicate = await User.findOne({ where: { email, id: { [Op.ne]: user.id } } });
     if (duplicate) return res.status(409).json({ message: "Email sudah terdaftar" });
