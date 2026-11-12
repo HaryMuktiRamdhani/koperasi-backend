@@ -1,117 +1,59 @@
-const Jurusan = require("../../models/Jurusan");
-const JURUSAN_STATUSES = ["Aktif", "Nonaktif", "Akan Datang"];
+const {
+  listJurusan,
+  createJurusan,
+  updateJurusan,
+  removeJurusan,
+} = require("../services/jurusanService");
+const ServiceError = require("../services/ServiceError");
 
-function validateStatus(status) {
-  return JURUSAN_STATUSES.includes(status)
-    ? null
-    : "Status jurusan tidak valid.";
+function handleServiceError(error, res, fallbackMessage) {
+  if (error instanceof ServiceError) {
+    return res.status(error.status).json({ message: error.message });
+  }
+  console.error(error);
+  return res.status(500).json({ message: fallbackMessage });
 }
 
 async function getAll(req, res) {
   try {
-    const data = await Jurusan.findAll({
-      order: [["nama", "ASC"]],
-    });
-
-    res.json(data);
+    return res.json(await listJurusan());
   } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      message: "Gagal mengambil data jurusan",
-    });
+    return handleServiceError(error, res, "Gagal mengambil data jurusan");
   }
 }
 
 async function create(req, res) {
   try {
-    const { nama, kode, status = "Aktif" } = req.body;
-
-    if (!nama || !kode) {
-      return res.status(400).json({
-        message: "Nama dan kode wajib diisi",
-      });
-    }
-    const statusError = validateStatus(status);
-    if (statusError) return res.status(400).json({ message: statusError });
-
-    const data = await Jurusan.create({
-      nama,
-      kode,
-      status,
-    });
-
-    res.status(201).json({
+    const data = await createJurusan(req.body);
+    return res.status(201).json({
       message: "Jurusan berhasil ditambahkan",
       data,
     });
   } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      message: "Gagal menambahkan jurusan",
-    });
+    return handleServiceError(error, res, "Gagal menambahkan jurusan");
   }
 }
 
 async function update(req, res) {
   try {
-    const { id } = req.params;
-    const data = await Jurusan.findByPk(id);
-
-    if (!data) {
-      return res.status(404).json({
-        message: "Jurusan tidak ditemukan",
-      });
-    }
-
-    const nextStatus =
-      req.body.status === undefined ? data.status || "Aktif" : req.body.status;
-    const statusError = validateStatus(nextStatus);
-    if (statusError) return res.status(400).json({ message: statusError });
-
-    await data.update({
-      ...(req.body.nama !== undefined ? { nama: req.body.nama } : {}),
-      ...(req.body.kode !== undefined ? { kode: req.body.kode } : {}),
-      status: nextStatus,
-    });
-
-    res.json({
+    const data = await updateJurusan(req.params.id, req.body);
+    return res.json({
       message: "Jurusan berhasil diperbarui",
       data,
     });
   } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      message: "Gagal memperbarui jurusan",
-    });
+    return handleServiceError(error, res, "Gagal memperbarui jurusan");
   }
 }
 
 async function remove(req, res) {
   try {
-    const { id } = req.params;
-
-    const data = await Jurusan.findByPk(id);
-
-    if (!data) {
-      return res.status(404).json({
-        message: "Jurusan tidak ditemukan",
-      });
-    }
-
-    await data.destroy();
-
-    res.json({
+    await removeJurusan(req.params.id);
+    return res.json({
       message: "Jurusan berhasil dihapus",
     });
   } catch (error) {
-    console.error(error);
-
-    res.status(500).json({
-      message: "Gagal menghapus jurusan",
-    });
+    return handleServiceError(error, res, "Gagal menghapus jurusan");
   }
 }
 

@@ -1,45 +1,15 @@
-const Payment = require("../../models/Payment");
-const Bill = require("../../models/Bill");
-const User = require("../../models/User");
-const { Student, Item, Class, Jurusan } = require("../../models");
+const {
+  listPayments,
+  createPayment,
+} = require("../services/paymentService");
+const ServiceError = require("../services/ServiceError");
 
 async function getAll(req, res) {
   try {
-    const data = await Payment.findAll({
-      include: [
-        {
-          model: Bill,
-          include: [
-            {
-              model: Student,
-              attributes: ["id", "nis", "name", "classId", "jurusanId"],
-              include: [
-                {
-                  model: Class,
-                  attributes: ["id", "name", "level", "academicYear"],
-                },
-                { model: Jurusan, attributes: ["id", "nama", "kode"] },
-              ],
-            },
-            {
-              model: Item,
-              attributes: ["id", "name", "price"],
-            },
-          ],
-        },
-        {
-          model: User,
-          attributes: ["id", "name", "email"],
-        },
-      ],
-      order: [["paymentDate", "DESC"]],
-    });
-
-    res.json(data);
+    return res.json(await listPayments());
   } catch (error) {
     console.error(error);
-
-    res.status(500).json({
+    return res.status(500).json({
       message: "Gagal mengambil data pembayaran",
     });
   }
@@ -47,55 +17,20 @@ async function getAll(req, res) {
 
 async function create(req, res) {
   try {
-    const { billId, amount, paymentMethod, paymentDate, notes } = req.body;
-
-    if (!billId || amount === undefined || !paymentMethod || !paymentDate) {
-      return res.status(400).json({
-        message: "Data pembayaran belum lengkap",
-      });
-    }
-
-    const bill = await Bill.findByPk(billId);
-
-    if (!bill) {
-      return res.status(404).json({
-        message: "Tagihan tidak ditemukan",
-      });
-    }
-
-    if (bill.status === "Lunas") {
-      return res.status(400).json({
-        message: "Tagihan sudah lunas",
-      });
-    }
-
-    if (amount !== bill.amount) {
-      return res.status(400).json({
-        message: "Nominal pembayaran harus sesuai dengan nominal tagihan",
-      });
-    }
-
-    const payment = await Payment.create({
-      billId,
-      amount,
-      paymentMethod,
-      paymentDate,
-      notes: notes || null,
+    const payment = await createPayment({
+      ...req.body,
       userId: req.user.id,
     });
-
-    await bill.update({
-      status: "Lunas",
-    });
-
-    res.status(201).json({
+    return res.status(201).json({
       message: "Pembayaran berhasil",
       data: payment,
     });
   } catch (error) {
+    if (error instanceof ServiceError) {
+      return res.status(error.status).json({ message: error.message });
+    }
     console.error(error);
-
-    res.status(500).json({
+    return res.status(500).json({
       message: "Gagal memproses pembayaran",
     });
   }
