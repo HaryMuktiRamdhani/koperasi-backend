@@ -12,12 +12,12 @@ const CooperativeProfile = sequelize.define(
     name: {
       type: DataTypes.STRING(150),
       allowNull: false,
-      defaultValue: "Koperasi Sekolah",
+      defaultValue: "Stokpedia",
     },
     subtitle: {
       type: DataTypes.STRING(150),
       allowNull: false,
-      defaultValue: "KOPERASI SEKOLAH",
+      defaultValue: "Stokpedia",
     },
     logoUrl: { type: DataTypes.STRING(500), allowNull: true },
   },

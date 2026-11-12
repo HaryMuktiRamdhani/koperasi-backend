@@ -10,12 +10,12 @@ module.exports = {
       name: {
         type: Sequelize.STRING(150),
         allowNull: false,
-        defaultValue: "Koperasi Sekolah",
+        defaultValue: "Stokpedia",
       },
       subtitle: {
         type: Sequelize.STRING(150),
         allowNull: false,
-        defaultValue: "KOPERASI SEKOLAH",
+        defaultValue: "Stokpedia",
       },
       logoUrl: { type: Sequelize.STRING(500), allowNull: true },
       createdAt: {

@@ -86,7 +86,7 @@ async function setup2fa(req, res) {
     totpEnabled: false,
     totpConfirmedAt: null,
   });
-  const issuer = encodeURIComponent("Koperasi Sekolah");
+  const issuer = encodeURIComponent("Stokpedia");
   const account = encodeURIComponent(user.email);
   return res.json({
     secret,

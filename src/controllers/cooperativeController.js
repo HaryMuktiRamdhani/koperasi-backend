@@ -5,8 +5,8 @@ const { CooperativeProfile } = require("../../models");
 
 const uploadDirectory = path.resolve(__dirname, "../../uploads/cooperative");
 const defaults = {
-  name: "Koperasi Sekolah",
-  subtitle: "KOPERASI SEKOLAH",
+  name: "Stokpedia",
+  subtitle: "Stokpedia",
   logoUrl: null,
 };
 const imageTypes = {
