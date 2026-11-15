@@ -180,7 +180,6 @@ Salin `.env.example` menjadi `.env`, kemudian sesuaikan nilainya.
 | `DB_PASSWORD` | Password database |
 | `JWT_SECRET` | Secret untuk autentikasi JWT |
 | `JWT_EXPIRES_IN` | Durasi berlaku JWT |
-| `APP_ENCRYPTION_KEY` | Kunci enkripsi secret TOTP |
 
 ### Instalasi dan Menjalankan Server
 
