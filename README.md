@@ -33,9 +33,6 @@ Sistem ini menyediakan berbagai layanan, mulai dari pengelolaan pengguna, siswa,
 
 - Login menggunakan email dan password.
 - Autentikasi menggunakan JSON Web Token (JWT).
-- Verifikasi dua faktor (2FA) menggunakan TOTP.
-- Menyediakan recovery code untuk 2FA.
-- Pembatasan akses berdasarkan role `admin` dan `staff`.
 - Pengelolaan akun dan status pengguna.
 - Pengelolaan profil dan perubahan password.
 - Pengelolaan sesi aktif pengguna.
@@ -121,7 +118,6 @@ Semua endpoint menggunakan prefix `/api`.
 | Profil | `/profile` | Pengelolaan profil dan password |
 | Sesi | `/profile/sessions` | Pengelolaan sesi pengguna |
 | Profil Koperasi | `/cooperative-profile` | Pengelolaan identitas koperasi |
-| Keamanan | `/security` | Pengaturan keamanan dan 2FA |
 
 Endpoint tertentu membutuhkan autentikasi menggunakan JWT melalui header `Authorization` dengan skema `Bearer`.
 
@@ -144,7 +140,6 @@ Beberapa tabel utama yang digunakan:
 | `cooperative_profiles` | Menyimpan profil koperasi |
 | `user_security_settings` | Menyimpan pengaturan keamanan pengguna |
 | `system_security_settings` | Menyimpan kebijakan keamanan sistem |
-| `recovery_codes` | Menyimpan recovery code 2FA |
 | `login_histories` | Menyimpan riwayat login |
 
 Relasi utama antar data meliputi:
@@ -158,16 +153,6 @@ Relasi utama antar data meliputi:
 
 Struktur database dikelola menggunakan migration Sequelize.
 
-## Pengelolaan File Upload
-
-Backend Stokpedia menyediakan pengelolaan file untuk kebutuhan profil koperasi dan profil pengguna.
-
-- Logo koperasi mendukung format PNG, JPG, JPEG, dan WebP.
-- Logo disimpan pada folder `uploads/cooperative`.
-- Nama file menggunakan UUID.
-- Foto profil pengguna dikirim dan disimpan dalam bentuk data URL.
-- File logo dapat diakses melalui static route `/uploads`.
-
 ## Keamanan Aplikasi
 
 Beberapa mekanisme keamanan yang diterapkan:
@@ -175,13 +160,7 @@ Beberapa mekanisme keamanan yang diterapkan:
 - Password disimpan dalam bentuk hash menggunakan bcrypt.
 - Autentikasi menggunakan JWT.
 - Pemeriksaan sesi aktif dan masa berlaku token.
-- Pembatasan akses berdasarkan role pengguna.
-- Verifikasi dua faktor menggunakan TOTP.
-- Recovery code disimpan dalam bentuk hash.
-- Pengaturan kebijakan password dan pembatasan percobaan login.
 - Perlindungan akun admin terakhir agar tidak dapat dinonaktifkan atau dihapus.
-- Penggunaan environment variables untuk konfigurasi sensitif.
-- Pembatasan ukuran request JSON hingga 4MB.
 
 ## Pengembangan
 
