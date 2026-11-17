@@ -28,6 +28,11 @@ const Item = sequelize.define(
         isIn: [["Aktif", "Nonaktif", "Akan Datang"]],
       },
     },
+
+    imageUrl: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
   },
   {
     tableName: "items",
