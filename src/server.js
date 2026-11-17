@@ -46,8 +46,13 @@ app.post("/api/auth/session/keep-alive", authenticateToken, keepAlive);
 app.use("/api/dashboard", authenticateToken, dashboardRoutes);
 app.use("/api/search", authenticateToken, searchRoutes);
 app.use("/api/notifications", authenticateToken, notificationRoutes);
-app.use("/api/cooperative-profile", authenticateToken, cooperativeRoutes);
-app.use("/api/security", authenticateToken, securityRoutes);
+app.use(
+  "/api/cooperative-profile",
+  authenticateToken,
+  requireRole("admin"),
+  cooperativeRoutes,
+);
+app.use("/api/security", authenticateToken, requireRole("admin"), securityRoutes);
 app.use("/api/users", authenticateToken, requireRole("admin"), userRoutes);
 app.get("/api/profile", authenticateToken, userController.getProfile);
 app.patch("/api/profile", authenticateToken, userController.updateProfile);
@@ -78,15 +83,10 @@ app.delete(
   userController.revokeAllSessions,
 );
 app.delete("/api/profile", authenticateToken, userController.deleteAccount);
-app.use("/api/jurusan", authenticateToken, requireRole("admin"), jurusanRoutes);
-app.use("/api/classes", authenticateToken, requireRole("admin"), classRoutes);
-app.use(
-  "/api/students",
-  authenticateToken,
-  requireRole("admin"),
-  studentRoutes,
-);
-app.use("/api/items", authenticateToken, requireRole("admin"), itemRoutes);
+app.use("/api/jurusan", authenticateToken, jurusanRoutes);
+app.use("/api/classes", authenticateToken, classRoutes);
+app.use("/api/students", authenticateToken, studentRoutes);
+app.use("/api/items", authenticateToken, itemRoutes);
 app.use("/api/bills", authenticateToken, billRoutes);
 app.use("/api/payments", authenticateToken, paymentRoutes);
 
