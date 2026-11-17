@@ -12,9 +12,9 @@ const {
 const router = express.Router();
 
 router.get("/", getAll);
-router.post("/", create);
-router.post("/bulk", createBulk);
-router.put("/:id", update);
+router.post("/", requireRole("admin", "staff"), create);
+router.post("/bulk", requireRole("admin", "staff"), createBulk);
+router.put("/:id", requireRole("admin", "staff"), update);
 router.delete("/:id", requireRole("admin"), remove);
 
 module.exports = router;

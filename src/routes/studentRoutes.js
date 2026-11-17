@@ -1,4 +1,5 @@
 const express = require("express");
+const requireRole = require("../middleware/roleMiddleware");
 
 const {
   getAll,
@@ -12,8 +13,8 @@ const router = express.Router();
 
 router.get("/", getAll);
 router.get("/:id", getById);
-router.post("/", create);
-router.put("/:id", update);
-router.delete("/:id", remove);
+router.post("/", requireRole("admin", "staff"), create);
+router.put("/:id", requireRole("admin", "staff"), update);
+router.delete("/:id", requireRole("admin"), remove);
 
 module.exports = router;
