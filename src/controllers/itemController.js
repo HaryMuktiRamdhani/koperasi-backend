@@ -6,6 +6,7 @@ const Item = require("../../models/Item");
 const ITEM_STATUSES = ["Aktif", "Nonaktif", "Akan Datang"];
 const MAX_NAME_LENGTH = 150;
 const MAX_PRICE = 2000000000;
+const MAX_STOCK = 2000000000;
 const MAX_IMAGE_SIZE = 2 * 1024 * 1024;
 const IMAGE_EXTENSIONS = {
   "image/png": "png",
@@ -35,6 +36,14 @@ function parsePrice(price) {
   if (typeof price === "string" && price.trim() === "") return null;
   const value = Number(price);
   if (!Number.isInteger(value) || value < 0 || value > MAX_PRICE) return null;
+  return value;
+}
+
+function parseStock(stock) {
+  if (typeof stock !== "number" && typeof stock !== "string") return null;
+  if (typeof stock === "string" && stock.trim() === "") return null;
+  const value = Number(stock);
+  if (!Number.isInteger(value) || value < 0 || value > MAX_STOCK) return null;
   return value;
 }
 
@@ -116,7 +125,7 @@ async function create(req, res) {
   let newImage = null;
 
   try {
-    const { name, price, status = "Aktif", imageData } = req.body;
+    const { name, price, status = "Aktif", imageData, stock = 0 } = req.body;
 
     if (!name || price === undefined) {
       return res.status(400).json({
@@ -134,6 +143,13 @@ async function create(req, res) {
       });
     }
 
+    const stockNumber = parseStock(stock);
+    if (stockNumber === null) {
+      return res.status(400).json({
+        message: "Stok harus berupa angka bulat 0 atau lebih.",
+      });
+    }
+
     const statusError = validateStatus(status);
     if (statusError) return res.status(400).json({ message: statusError });
 
@@ -145,6 +161,7 @@ async function create(req, res) {
       name: name.trim(),
       price: priceNumber,
       status,
+      stock: stockNumber,
       imageUrl: newImage ? newImage.imageUrl : null,
     });
 
@@ -191,6 +208,14 @@ async function update(req, res) {
       });
     }
 
+    const nextStock =
+      req.body.stock === undefined ? data.stock : parseStock(req.body.stock);
+    if (nextStock === null) {
+      return res.status(400).json({
+        message: "Stok harus berupa angka bulat 0 atau lebih.",
+      });
+    }
+
     const nextStatus =
       req.body.status === undefined ? data.status || "Aktif" : req.body.status;
     const statusError = validateStatus(nextStatus);
@@ -210,6 +235,7 @@ async function update(req, res) {
       name: nextName.trim(),
       price: nextPrice,
       status: nextStatus,
+      stock: nextStock,
       imageUrl: nextImageUrl,
     });
 
