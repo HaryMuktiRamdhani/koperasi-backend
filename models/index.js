@@ -7,6 +7,7 @@ const Bill = require("./Bill");
 const Payment = require("./Payment");
 const StockOpname = require("./StockOpname");
 const GoodsReceipt = require("./GoodsReceipt");
+const GoodsIssue = require("./GoodsIssue");
 const Session = require("./Session");
 const CooperativeProfile = require("./CooperativeProfile");
 const UserSecuritySettings = require("./UserSecuritySettings");
@@ -102,6 +103,22 @@ User.hasMany(GoodsReceipt, {
   foreignKey: "userId",
 });
 
+GoodsIssue.belongsTo(Item, {
+  foreignKey: "itemId",
+});
+
+Item.hasMany(GoodsIssue, {
+  foreignKey: "itemId",
+});
+
+GoodsIssue.belongsTo(User, {
+  foreignKey: "userId",
+});
+
+User.hasMany(GoodsIssue, {
+  foreignKey: "userId",
+});
+
 User.hasMany(Session, { foreignKey: "userId" });
 Session.belongsTo(User, { foreignKey: "userId" });
 User.hasOne(UserSecuritySettings, { foreignKey: "userId" });
@@ -121,6 +138,7 @@ module.exports = {
   Payment,
   StockOpname,
   GoodsReceipt,
+  GoodsIssue,
   Session,
   CooperativeProfile,
   UserSecuritySettings,

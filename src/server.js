@@ -10,6 +10,7 @@ const billRoutes = require("./routes/billRoutes");
 const paymentRoutes = require("./routes/paymentRoutes");
 const stockOpnameRoutes = require("./routes/stockOpnameRoutes");
 const goodsReceiptRoutes = require("./routes/goodsReceiptRoutes");
+const goodsIssueRoutes = require("./routes/goodsIssueRoutes");
 const dashboardRoutes = require("./routes/dashboardRoutes");
 const userRoutes = require("./routes/userRoutes");
 const searchRoutes = require("./routes/searchRoutes");
@@ -93,6 +94,7 @@ app.use("/api/bills", authenticateToken, billRoutes);
 app.use("/api/payments", authenticateToken, paymentRoutes);
 app.use("/api/stock-opname", authenticateToken, stockOpnameRoutes);
 app.use("/api/goods-receipts", authenticateToken, goodsReceiptRoutes);
+app.use("/api/goods-issues", authenticateToken, goodsIssueRoutes);
 
 async function startServer() {
   try {
