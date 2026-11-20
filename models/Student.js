@@ -1,6 +1,8 @@
 const { DataTypes } = require("sequelize");
 const sequelize = require("../src/config/database");
 
+const GENDERS = ["Laki-laki", "Perempuan"];
+
 const Student = sequelize.define(
   "Student",
   {
@@ -36,6 +38,16 @@ const Student = sequelize.define(
       allowNull: false,
     },
 
+    // Boleh kosong agar siswa lama tidak error; siswa baru wajib mengisinya
+    // (divalidasi di controller).
+    gender: {
+      type: DataTypes.STRING,
+      allowNull: true,
+      validate: {
+        isIn: [GENDERS],
+      },
+    },
+
     status: {
       type: DataTypes.STRING,
       allowNull: false,
@@ -47,5 +59,7 @@ const Student = sequelize.define(
     timestamps: true,
   },
 );
+
+Student.GENDERS = GENDERS;
 
 module.exports = Student;

@@ -89,13 +89,15 @@ async function getById(req, res) {
 
 async function create(req, res) {
   try {
-    const { nis, name, classId, jurusanId, generation, status } = req.body;
+    const { nis, name, classId, jurusanId, generation, status, gender } =
+      req.body;
 
     const normalizedNis = typeof nis === "string" ? nis.trim() : "";
     const normalizedName = typeof name === "string" ? name.trim() : "";
     const normalizedGeneration =
       typeof generation === "string" ? generation.trim() : "";
     const normalizedStatus = status || "Aktif";
+    const normalizedGender = typeof gender === "string" ? gender.trim() : gender;
 
     if (
       !normalizedNis ||
@@ -111,6 +113,18 @@ async function create(req, res) {
     if (!STUDENT_STATUSES.includes(normalizedStatus)) {
       return res.status(400).json({ message: "Status siswa tidak valid." });
     }
+    if (
+      normalizedGender === undefined ||
+      normalizedGender === null ||
+      normalizedGender === ""
+    ) {
+      return res.status(400).json({ message: "Jenis kelamin wajib diisi." });
+    }
+    if (!Student.GENDERS.includes(normalizedGender)) {
+      return res
+        .status(400)
+        .json({ message: "Jenis kelamin harus Laki-laki atau Perempuan." });
+    }
 
     const relationError = await validateClassJurusan(classId, jurusanId);
     if (relationError) {
@@ -123,6 +137,7 @@ async function create(req, res) {
       classId,
       jurusanId,
       generation: normalizedGeneration,
+      gender: normalizedGender,
       status: normalizedStatus,
     });
 
@@ -161,6 +176,30 @@ async function update(req, res) {
       });
     }
 
+    // Jenis kelamin boleh tetap kosong pada siswa lama. Nilai kosong berarti
+    // "tidak diubah"; nilai yang diisi harus Laki-laki atau Perempuan.
+    const updates = { ...req.body };
+    if (Object.prototype.hasOwnProperty.call(updates, "gender")) {
+      const submittedGender =
+        typeof updates.gender === "string"
+          ? updates.gender.trim()
+          : updates.gender;
+
+      if (
+        submittedGender === undefined ||
+        submittedGender === null ||
+        submittedGender === ""
+      ) {
+        delete updates.gender;
+      } else if (!Student.GENDERS.includes(submittedGender)) {
+        return res
+          .status(400)
+          .json({ message: "Jenis kelamin harus Laki-laki atau Perempuan." });
+      } else {
+        updates.gender = submittedGender;
+      }
+    }
+
     if (req.body.classId || req.body.jurusanId) {
       const nextClassId = req.body.classId || data.classId;
       const isChangingClass = nextClassId !== data.classId;
@@ -186,7 +225,7 @@ async function update(req, res) {
       }
     }
 
-    await data.update(req.body);
+    await data.update(updates);
 
     res.json({
       message: "Data siswa berhasil diperbarui",
