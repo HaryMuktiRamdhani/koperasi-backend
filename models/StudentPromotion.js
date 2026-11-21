@@ -79,6 +79,37 @@ const StudentPromotion = sequelize.define(
       type: DataTypes.UUID,
       allowNull: true,
     },
+
+    // Salinan data saat proses, agar riwayat tetap utuh walau data berubah
+    studentNis: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+
+    studentName: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+
+    jurusanId: {
+      type: DataTypes.UUID,
+      allowNull: true,
+    },
+
+    jurusanName: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+
+    jurusanCode: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+
+    processedByName: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
   },
   {
     tableName: "student_promotions",

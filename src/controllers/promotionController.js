@@ -6,6 +6,7 @@ const {
   Jurusan,
   Student,
   StudentPromotion,
+  User,
 } = require("../../models");
 const ServiceError = require("../services/ServiceError");
 
@@ -22,6 +23,7 @@ const ACTION_LABEL = {
   promote: "Naik Kelas",
   stay: "Tinggal Kelas",
   alumni: "Calon Alumni",
+  skip: "Tidak Diproses",
 };
 
 /* ------------------------------ Tahun ajaran ----------------------------- */
@@ -109,7 +111,13 @@ async function loadContext(fromYear, transaction) {
   });
   const processed = await StudentPromotion.findAll({
     where: {
-      [Op.or]: [{ fromAcademicYear: fromYear }, { toAcademicYear: toYear }],
+      [Op.and]: [
+        {
+          [Op.or]: [{ fromAcademicYear: fromYear }, { toAcademicYear: toYear }],
+        },
+        // Keputusan "Tidak Diproses" hanya riwayat; tidak mengunci siswa
+        { action: { [Op.ne]: ACTION_LABEL.skip } },
+      ],
     },
     attributes: ["studentId", "action", "fromAcademicYear", "toAcademicYear"],
     raw: true,
@@ -197,6 +205,7 @@ async function loadContext(fromYear, transaction) {
             nis: student.nis,
             name: student.name,
             generation: student.generation,
+            jurusanId: student.jurusanId,
             locked: Boolean(record),
             lockedReason: record
               ? `Sudah diproses (${record.action}) untuk tahun ajaran ${record.fromAcademicYear} → ${record.toAcademicYear}.`
@@ -219,16 +228,43 @@ async function loadContext(fromYear, transaction) {
     toStart,
     groups,
     studentIndex,
+    jurusanById,
     classById: new Map(classes.map((item) => [item.id, item])),
   };
 }
 
 /* ------------------------------ Rencana & preview ------------------------ */
 
+// Salinan data siswa/jurusan saat proses, agar riwayat tetap utuh walau data berubah
+function snapshotFields(context, student) {
+  const jurusan = context.jurusanById.get(student.jurusanId);
+  return {
+    studentNis: student.nis,
+    studentName: student.name,
+    jurusanId: student.jurusanId || null,
+    jurusanName: jurusan ? jurusan.nama : null,
+    jurusanCode: jurusan ? jurusan.kode : null,
+  };
+}
+
+function baseRow(context, student, group) {
+  return {
+    studentId: student.id,
+    nis: student.nis,
+    name: student.name,
+    fromClassId: group.classId,
+    fromClassName: group.className,
+    fromLevel: group.level,
+    fromStatus: "Aktif",
+    ...snapshotFields(context, student),
+  };
+}
+
 function buildPlan(context, payload) {
   const errors = [];
   const warnings = [];
   const rows = [];
+  const skipRows = [];
   const summary = { promote: 0, stay: 0, alumni: 0, skip: 0 };
   const classErrors = new Set();
   const classWarnings = new Set();
@@ -248,15 +284,28 @@ function buildPlan(context, payload) {
       errors.push("Pilihan aksi siswa tidak valid.");
       return;
     }
-    if (action === "skip") {
-      summary.skip += 1;
-      return;
-    }
     if (seen.has(studentId)) {
       errors.push("Terdapat siswa yang dipilih lebih dari satu kali.");
       return;
     }
     seen.add(studentId);
+
+    if (action === "skip") {
+      summary.skip += 1;
+      // Keputusan "Tidak Diproses" dicatat sebagai riwayat (tanpa mengubah siswa)
+      const skipEntry = context.studentIndex.get(studentId);
+      if (skipEntry && !skipEntry.student.locked) {
+        skipRows.push({
+          ...baseRow(context, skipEntry.student, skipEntry.group),
+          action: ACTION_LABEL.skip,
+          toClassId: skipEntry.group.classId,
+          toClassName: skipEntry.group.className,
+          toLevel: skipEntry.group.level,
+          toStatus: "Aktif",
+        });
+      }
+      return;
+    }
 
     const entry = context.studentIndex.get(studentId);
     if (!entry) {
@@ -274,15 +323,7 @@ function buildPlan(context, payload) {
       return;
     }
 
-    const base = {
-      studentId: student.id,
-      nis: student.nis,
-      name: student.name,
-      fromClassId: group.classId,
-      fromClassName: group.className,
-      fromLevel: group.level,
-      fromStatus: "Aktif",
-    };
+    const base = baseRow(context, student, group);
 
     if (action === "stay") {
       summary.stay += 1;
@@ -373,6 +414,7 @@ function buildPlan(context, payload) {
     valid: errors.length === 0 && rows.length > 0,
     summary,
     rows,
+    skipRows,
     errors: [...new Set(errors)],
     warnings,
   };
@@ -455,11 +497,13 @@ async function preview(req, res) {
     const { fromYear, items, destinations } = parsePayload(req.body);
     const context = await loadContext(fromYear);
     const plan = buildPlan(context, { items, destinations });
+    const publicPlan = { ...plan };
+    delete publicPlan.skipRows;
 
     res.json({
       fromAcademicYear: context.fromYear,
       toAcademicYear: context.toYear,
-      ...plan,
+      ...publicPlan,
     });
   } catch (error) {
     if (error instanceof ServiceError) {
@@ -538,8 +582,13 @@ async function commit(req, res) {
       }
 
       // 3. Simpan riwayat kelas lama sebelum/bersamaan dengan perubahan
+      //    (termasuk keputusan "Tidak Diproses")
+      const processedBy = await User.findByPk(req.user.id, {
+        attributes: ["name"],
+        transaction,
+      });
       await StudentPromotion.bulkCreate(
-        plan.rows.map((row) => ({
+        [...plan.rows, ...plan.skipRows].map((row) => ({
           batchId,
           studentId: row.studentId,
           fromClassId: row.fromClassId,
@@ -554,6 +603,12 @@ async function commit(req, res) {
           fromStatus: row.fromStatus,
           toStatus: row.toStatus,
           userId: req.user.id,
+          studentNis: row.studentNis,
+          studentName: row.studentName,
+          jurusanId: row.jurusanId,
+          jurusanName: row.jurusanName,
+          jurusanCode: row.jurusanCode,
+          processedByName: processedBy ? processedBy.name : null,
         })),
         { transaction },
       );
