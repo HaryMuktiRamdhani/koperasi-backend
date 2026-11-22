@@ -2,6 +2,10 @@ const Student = require("../../models/Student");
 const { Class, Jurusan } = require("../../models");
 
 const STUDENT_STATUSES = ["Aktif", "Lulus", "Pindah", "Keluar"];
+// Status "Lulus" (alumni) hanya boleh diberikan oleh fitur Kenaikan Siswa
+const ALUMNI_STATUS = "Lulus";
+const ALUMNI_STATUS_MESSAGE =
+  "Status Lulus (alumni) hanya dapat diberikan melalui fitur Kenaikan Siswa kelas XII.";
 
 async function validateClassJurusan(classId, jurusanId) {
   const selectedClass = await Class.findByPk(classId, {
@@ -46,7 +50,17 @@ async function validateClassJurusan(classId, jurusanId) {
 
 async function getAll(req, res) {
   try {
+    // ?status=Aktif -> hanya siswa dengan status tersebut (tanpa parameter: semua)
+    const where = {};
+    if (req.query.status !== undefined && req.query.status !== "") {
+      if (!STUDENT_STATUSES.includes(req.query.status)) {
+        return res.status(400).json({ message: "Status siswa tidak valid." });
+      }
+      where.status = req.query.status;
+    }
+
     const data = await Student.findAll({
+      where,
       include: [
         {
           model: Class,
@@ -112,6 +126,9 @@ async function create(req, res) {
     }
     if (!STUDENT_STATUSES.includes(normalizedStatus)) {
       return res.status(400).json({ message: "Status siswa tidak valid." });
+    }
+    if (normalizedStatus === ALUMNI_STATUS) {
+      return res.status(400).json({ message: ALUMNI_STATUS_MESSAGE });
     }
     if (
       normalizedGender === undefined ||
@@ -198,6 +215,22 @@ async function update(req, res) {
       } else {
         updates.gender = submittedGender;
       }
+    }
+
+    if (Object.prototype.hasOwnProperty.call(updates, "status")) {
+      const submittedStatus =
+        typeof updates.status === "string"
+          ? updates.status.trim()
+          : updates.status;
+
+      if (!STUDENT_STATUSES.includes(submittedStatus)) {
+        return res.status(400).json({ message: "Status siswa tidak valid." });
+      }
+      // Siswa hanya menjadi alumni lewat Kenaikan Siswa, bukan edit manual
+      if (submittedStatus === ALUMNI_STATUS && data.status !== ALUMNI_STATUS) {
+        return res.status(400).json({ message: ALUMNI_STATUS_MESSAGE });
+      }
+      updates.status = submittedStatus;
     }
 
     if (req.body.classId || req.body.jurusanId) {

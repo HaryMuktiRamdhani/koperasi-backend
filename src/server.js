@@ -12,6 +12,7 @@ const stockOpnameRoutes = require("./routes/stockOpnameRoutes");
 const goodsReceiptRoutes = require("./routes/goodsReceiptRoutes");
 const goodsIssueRoutes = require("./routes/goodsIssueRoutes");
 const promotionRoutes = require("./routes/promotionRoutes");
+const alumniRoutes = require("./routes/alumniRoutes");
 const dashboardRoutes = require("./routes/dashboardRoutes");
 const userRoutes = require("./routes/userRoutes");
 const searchRoutes = require("./routes/searchRoutes");
@@ -97,6 +98,7 @@ app.use("/api/stock-opname", authenticateToken, stockOpnameRoutes);
 app.use("/api/goods-receipts", authenticateToken, goodsReceiptRoutes);
 app.use("/api/goods-issues", authenticateToken, goodsIssueRoutes);
 app.use("/api/promotions", authenticateToken, promotionRoutes);
+app.use("/api/alumni", authenticateToken, alumniRoutes);
 
 async function startServer() {
   try {
