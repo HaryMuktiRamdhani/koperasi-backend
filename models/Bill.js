@@ -1,3 +1,4 @@
+
 const { DataTypes } = require("sequelize");
 const sequelize = require("../src/config/database");
 
@@ -20,14 +21,26 @@ const Bill = sequelize.define(
       allowNull: false,
     },
 
+    quantity: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 1,
+      validate: {
+        min: 1,
+        isInt: true,
+      },
+    },
+
     amount: {
       type: DataTypes.INTEGER,
       allowNull: false,
     },
+
     billDate: {
       type: DataTypes.DATEONLY,
       allowNull: true,
     },
+
     dueDate: {
       type: DataTypes.DATEONLY,
       allowNull: true,
