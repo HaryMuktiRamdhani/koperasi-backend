@@ -1,3 +1,4 @@
+
 const { Class, Student, Jurusan } = require("../../models");
 
 const CLASS_STATUSES = ["Aktif", "Akan datang", "Nonaktif", "Lulus/Arsip"];
@@ -27,7 +28,7 @@ async function getAll(req, res) {
       include: [
         {
           model: Student,
-          attributes: ["jurusanId"],
+          attributes: ["jurusanId", "status"],
           required: false,
         },
         {
@@ -48,11 +49,16 @@ async function getAll(req, res) {
           ),
         ];
 
+        const studentCount = (plainItem.Students || []).filter(
+          (student) => student.status === "Aktif",
+        ).length;
+
         delete plainItem.Students;
+
         return {
           ...plainItem,
           jurusanIds: plainItem.jurusanId ? [plainItem.jurusanId] : jurusanIds,
-          studentCount: (item.Students || []).length,
+          studentCount,
         };
       }),
     );
@@ -150,7 +156,13 @@ async function remove(req, res) {
       });
     }
 
-    const studentCount = await Student.count({ where: { classId: data.id } });
+    const studentCount = await Student.count({
+      where: {
+        classId: data.id,
+        status: "Aktif",
+      },
+    });
+
     if (studentCount > 0) {
       return res.status(409).json({
         message: `Kelas tidak dapat dihapus karena masih digunakan oleh ${studentCount} siswa. Ubah statusnya menjadi Lulus/Arsip atau Nonaktif.`,
