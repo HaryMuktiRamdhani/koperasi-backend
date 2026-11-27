@@ -1,3 +1,4 @@
+
 const crypto = require("crypto");
 const { Op } = require("sequelize");
 const sequelize = require("../config/database");
@@ -75,15 +76,63 @@ function classAcceptsJurusan(candidate, jurusanId, jurusanSet) {
   return !jurusanSet || jurusanSet.size === 0 || jurusanSet.has(jurusanId);
 }
 
-function suggestDestination(sourceClass, destinations) {
+/**
+ * Menentukan kelas tujuan yang disarankan.
+ *
+ * Prioritas:
+ * 1. Kelas dengan periode tepat sama dengan tahun ajaran tujuan.
+ * 2. Jika ada beberapa kelas dengan periode tepat, pilih yang
+ *    memiliki nomor rombel sama dengan kelas asal apabila unik.
+ * 3. Jika tidak ada kelas dengan periode tepat, gunakan kelas
+ *    dengan cohort yang sama seperti sebelumnya.
+ * 4. Jika masih belum ditemukan, pilih nomor rombel yang sama
+ *    apabila hanya ada satu pilihan.
+ *
+ * Pemilihan kelas tujuan tetap bisa diubah secara manual oleh pengguna.
+ */
+function suggestDestination(sourceClass, destinations, toYear) {
+  const exactTargetYear = destinations.filter(
+    (item) => item.academicYear === toYear,
+  );
+
+  if (exactTargetYear.length === 1) {
+    return exactTargetYear[0].id;
+  }
+
+  if (exactTargetYear.length > 1) {
+    const sameNumber = exactTargetYear.filter(
+      (item) => classSuffix(item.name) === classSuffix(sourceClass.name),
+    );
+
+    if (sameNumber.length === 1) {
+      return sameNumber[0].id;
+    }
+  }
+
   const sameCohort = destinations.filter((item) => item.sameCohort);
-  if (sameCohort.length === 1) return sameCohort[0].id;
+
+  if (sameCohort.length === 1) {
+    return sameCohort[0].id;
+  }
+
   if (sameCohort.length > 1) {
     const sameNumber = sameCohort.filter(
       (item) => classSuffix(item.name) === classSuffix(sourceClass.name),
     );
-    if (sameNumber.length === 1) return sameNumber[0].id;
+
+    if (sameNumber.length === 1) {
+      return sameNumber[0].id;
+    }
   }
+
+  const sameNumber = destinations.filter(
+    (item) => classSuffix(item.name) === classSuffix(sourceClass.name),
+  );
+
+  if (sameNumber.length === 1) {
+    return sameNumber[0].id;
+  }
+
   return null;
 }
 
@@ -98,17 +147,20 @@ async function loadContext(fromYear, transaction) {
     raw: true,
     ...options,
   });
+
   const students = await Student.findAll({
     attributes: ["id", "nis", "name", "classId", "jurusanId", "generation", "status"],
     order: [["name", "ASC"]],
     raw: true,
     ...options,
   });
+
   const jurusanList = await Jurusan.findAll({
     attributes: ["id", "nama", "kode"],
     raw: true,
     ...options,
   });
+
   const processed = await StudentPromotion.findAll({
     where: {
       [Op.and]: [
@@ -125,26 +177,32 @@ async function loadContext(fromYear, transaction) {
   });
 
   const jurusanById = new Map(jurusanList.map((item) => [item.id, item]));
+
   const processedByStudent = new Map(
     processed.map((item) => [item.studentId, item]),
   );
 
   const jurusanSetByClass = new Map();
   const activeStudentsByClass = new Map();
+
   students.forEach((student) => {
     if (!jurusanSetByClass.has(student.classId)) {
       jurusanSetByClass.set(student.classId, new Set());
     }
+
     jurusanSetByClass.get(student.classId).add(student.jurusanId);
+
     if (student.status === "Aktif") {
       if (!activeStudentsByClass.has(student.classId)) {
         activeStudentsByClass.set(student.classId, []);
       }
+
       activeStudentsByClass.get(student.classId).push(student);
     }
   });
 
   const levelOrder = (level) => LEVELS.indexOf(level);
+
   const groups = classes
     .filter(
       (cls) =>
@@ -177,11 +235,17 @@ async function loadContext(fromYear, transaction) {
                   jurusanSetByClass.get(candidate.id),
                 ),
             )
-            .sort((a, b) => a.name.localeCompare(b.name, "id", { numeric: true }))
+            .sort((a, b) =>
+              a.name.localeCompare(b.name, "id", { numeric: true }),
+            )
             .map((candidate) => ({
               id: candidate.id,
               name: candidate.name,
               academicYear: candidate.academicYear,
+
+              // Tetap dipertahankan untuk kompatibilitas struktur data.
+              // Properti ini hanya digunakan untuk prioritas rekomendasi,
+              // bukan untuk menentukan valid/tidaknya kelas tujuan.
               sameCohort: candidate.academicYear === cls.academicYear,
             }))
         : [];
@@ -197,9 +261,14 @@ async function loadContext(fromYear, transaction) {
         jurusanCode: jurusan ? jurusan.kode : null,
         mixedJurusan: !jurusanId,
         destinations,
-        suggestedDestinationId: suggestDestination(cls, destinations),
+        suggestedDestinationId: suggestDestination(
+          cls,
+          destinations,
+          toYear,
+        ),
         students: activeStudentsByClass.get(cls.id).map((student) => {
           const record = processedByStudent.get(student.id);
+
           return {
             id: student.id,
             nis: student.nis,
@@ -216,6 +285,7 @@ async function loadContext(fromYear, transaction) {
     });
 
   const studentIndex = new Map();
+
   groups.forEach((group) => {
     group.students.forEach((student) => {
       studentIndex.set(student.id, { student, group });
@@ -238,6 +308,7 @@ async function loadContext(fromYear, transaction) {
 // Salinan data siswa/jurusan saat proses, agar riwayat tetap utuh walau data berubah
 function snapshotFields(context, student) {
   const jurusan = context.jurusanById.get(student.jurusanId);
+
   return {
     studentNis: student.nis,
     studentName: student.name,
@@ -267,10 +338,10 @@ function buildPlan(context, payload) {
   const skipRows = [];
   const summary = { promote: 0, stay: 0, alumni: 0, skip: 0 };
   const classErrors = new Set();
-  const classWarnings = new Set();
   const seen = new Set();
 
   const items = Array.isArray(payload.items) ? payload.items : [];
+
   const destinations =
     payload.destinations && typeof payload.destinations === "object"
       ? payload.destinations
@@ -284,16 +355,20 @@ function buildPlan(context, payload) {
       errors.push("Pilihan aksi siswa tidak valid.");
       return;
     }
+
     if (seen.has(studentId)) {
       errors.push("Terdapat siswa yang dipilih lebih dari satu kali.");
       return;
     }
+
     seen.add(studentId);
 
     if (action === "skip") {
       summary.skip += 1;
+
       // Keputusan "Tidak Diproses" dicatat sebagai riwayat (tanpa mengubah siswa)
       const skipEntry = context.studentIndex.get(studentId);
+
       if (skipEntry && !skipEntry.student.locked) {
         skipRows.push({
           ...baseRow(context, skipEntry.student, skipEntry.group),
@@ -304,10 +379,12 @@ function buildPlan(context, payload) {
           toStatus: "Aktif",
         });
       }
+
       return;
     }
 
     const entry = context.studentIndex.get(studentId);
+
     if (!entry) {
       errors.push(
         "Ada siswa yang tidak memenuhi syarat diproses (tidak aktif atau kelasnya tidak aktif).",
@@ -316,6 +393,7 @@ function buildPlan(context, payload) {
     }
 
     const { student, group } = entry;
+
     if (student.locked) {
       errors.push(
         `${student.name} (${student.nis}) sudah diproses pada tahun ajaran ini.`,
@@ -327,6 +405,7 @@ function buildPlan(context, payload) {
 
     if (action === "stay") {
       summary.stay += 1;
+
       rows.push({
         ...base,
         action: ACTION_LABEL.stay,
@@ -335,12 +414,14 @@ function buildPlan(context, payload) {
         toLevel: group.level,
         toStatus: "Aktif",
       });
+
       return;
     }
 
     // action === "promote"
     if (!group.nextLevel) {
       summary.alumni += 1;
+
       rows.push({
         ...base,
         action: ACTION_LABEL.alumni,
@@ -349,53 +430,67 @@ function buildPlan(context, payload) {
         toLevel: "Alumni",
         toStatus: "Lulus",
       });
+
       return;
     }
 
     if (group.mixedJurusan) {
       if (!classErrors.has(group.classId)) {
         classErrors.add(group.classId);
+
         errors.push(
           `Kelas ${group.className} berisi siswa dari beberapa jurusan. Lengkapi jurusan kelas terlebih dahulu.`,
         );
       }
+
       return;
     }
 
     const destinationId = destinations[group.classId];
+
     if (!destinationId) {
       if (!classErrors.has(group.classId)) {
         classErrors.add(group.classId);
+
         errors.push(
           group.destinations.length
             ? `Kelas tujuan untuk ${group.className} belum dipilih.`
             : `Kelas tujuan ${group.nextLevel} tahun ajaran ${context.toYear} untuk ${group.className} belum tersedia. Tambahkan kelas tersebut di halaman Kelas.`,
         );
       }
+
       return;
     }
 
     const destination = group.destinations.find(
       (item) => item.id === destinationId,
     );
+
     if (!destination) {
       if (!classErrors.has(group.classId)) {
         classErrors.add(group.classId);
+
         errors.push(
           `Kelas tujuan untuk ${group.className} tidak valid atau tidak tersedia.`,
         );
       }
+
       return;
     }
 
-    if (!destination.sameCohort && !classWarnings.has(group.classId)) {
-      classWarnings.add(group.classId);
-      warnings.push(
-        `Kelas tujuan ${destination.name} (${destination.academicYear}) memiliki periode berbeda dari kelas asal ${group.className} (${group.academicYear}).`,
-      );
-    }
+    /*
+     * Kelas tujuan sudah dipastikan memenuhi classCoversYear()
+     * ketika daftar destinations dibuat di loadContext().
+     *
+     * Karena itu, perbedaan periode akademik kelas asal dan tujuan
+     * bukan alasan untuk memberikan warning atau menolak kenaikan.
+     *
+     * Validasi kelas tujuan tetap dilakukan melalui destinationId
+     * yang harus ditemukan dalam group.destinations.
+     */
 
     summary.promote += 1;
+
     rows.push({
       ...base,
       action: ACTION_LABEL.promote,
@@ -422,6 +517,7 @@ function buildPlan(context, payload) {
 
 function parsePayload(body) {
   const fromYear = body && body.fromAcademicYear;
+
   if (!parseSchoolYear(fromYear)) {
     throw new ServiceError(
       400,
@@ -430,9 +526,11 @@ function parsePayload(body) {
   }
 
   const items = body.items;
+
   if (!Array.isArray(items) || items.length === 0 || items.length > MAX_ITEMS) {
     throw new ServiceError(400, "Daftar siswa kosong atau terlalu banyak.");
   }
+
   items.forEach((item) => {
     if (
       !item ||
@@ -444,9 +542,11 @@ function parsePayload(body) {
   });
 
   const destinations = body.destinations || {};
+
   if (typeof destinations !== "object" || Array.isArray(destinations)) {
     throw new ServiceError(400, "Data kelas tujuan tidak valid.");
   }
+
   Object.entries(destinations).forEach(([classId, destinationId]) => {
     if (
       !UUID_PATTERN.test(classId) ||
@@ -498,6 +598,7 @@ async function preview(req, res) {
     const context = await loadContext(fromYear);
     const plan = buildPlan(context, { items, destinations });
     const publicPlan = { ...plan };
+
     delete publicPlan.skipRows;
 
     res.json({
@@ -521,6 +622,7 @@ async function preview(req, res) {
 async function commit(req, res) {
   try {
     const { fromYear, items, destinations } = parsePayload(req.body);
+
     const studentIds = [
       ...new Set(
         items
@@ -549,6 +651,7 @@ async function commit(req, res) {
       // Validasi ulang di dalam transaksi dengan data terbaru
       const context = await loadContext(fromYear, transaction);
       const plan = buildPlan(context, { items, destinations });
+
       if (!plan.valid) return { plan, applied: false };
 
       const batchId = crypto.randomUUID();
@@ -556,11 +659,13 @@ async function commit(req, res) {
       // 1. Pindahkan siswa yang naik kelas (dikelompokkan per kelas tujuan)
       const idsByDestination = new Map();
       const alumniIds = [];
+
       plan.rows.forEach((row) => {
         if (row.action === ACTION_LABEL.promote) {
           if (!idsByDestination.has(row.toClassId)) {
             idsByDestination.set(row.toClassId, []);
           }
+
           idsByDestination.get(row.toClassId).push(row.studentId);
         } else if (row.action === ACTION_LABEL.alumni) {
           alumniIds.push(row.studentId);
@@ -573,6 +678,7 @@ async function commit(req, res) {
           { where: { id: ids }, transaction },
         );
       }
+
       // 2. Siswa kelas XII ditandai Lulus (calon alumni); kelasnya tidak diubah
       if (alumniIds.length) {
         await Student.update(
@@ -587,6 +693,7 @@ async function commit(req, res) {
         attributes: ["name"],
         transaction,
       });
+
       await StudentPromotion.bulkCreate(
         [...plan.rows, ...plan.skipRows].map((row) => ({
           batchId,
