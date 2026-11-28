@@ -1,4 +1,3 @@
-
 const crypto = require("crypto");
 const { Op } = require("sequelize");
 const sequelize = require("../config/database");
@@ -14,6 +13,10 @@ const ServiceError = require("../services/ServiceError");
 const LEVELS = ["X", "XI", "XII"];
 const NEXT_LEVEL = { X: "XI", XI: "XII", XII: null };
 const ACTIONS = ["promote", "stay", "skip"];
+// Kelas tujuan boleh berstatus Aktif atau Akan datang (kelas yang disiapkan
+// untuk tahun ajaran berikutnya). Kelas "Akan datang" otomatis menjadi Aktif
+// ketika sudah menerima siswa.
+const DESTINATION_STATUSES = ["Aktif", "Akan datang"];
 const MAX_ITEMS = 5000;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -48,18 +51,43 @@ function defaultSchoolYearStart(now = new Date()) {
   return now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1;
 }
 
-// Periode kelas (mis. 2025/2028 atau 2026/2027) mencakup tahun ajaran tertentu
-function classCoversYear(cls, startYear) {
+// Membaca periode kelas (mis. 2025/2028 atau 2026/2027)
+function parseClassPeriod(cls) {
   const match =
     typeof cls.academicYear === "string"
       ? cls.academicYear.match(/^(\d{4})\/(\d{4})$/)
       : null;
-  if (!match) return false;
-  return Number(match[1]) <= startYear && startYear < Number(match[2]);
+  if (!match) return null;
+  return { start: Number(match[1]), end: Number(match[2]) };
+}
+
+// Periode kelas (mis. 2025/2028 atau 2026/2027) mencakup tahun ajaran tertentu
+function classCoversYear(cls, startYear) {
+  const period = parseClassPeriod(cls);
+  if (!period) return false;
+  return period.start <= startYear && startYear < period.end;
+}
+
+/*
+ * Kelas masih relevan sebagai kelas tujuan apabila periodenya belum
+ * berakhir sebelum tahun ajaran asal dan belum dimulai setelah tahun
+ * ajaran tujuan. Kelas dengan periode yang berbeda dari tahun ajaran
+ * tujuan (mis. kelas XII angkatan lama 2024/2027 yang dipakai kembali)
+ * tetap boleh dipilih; perbedaannya hanya ditampilkan sebagai peringatan.
+ * Kelas dengan format periode lama tetap ditampilkan agar bisa dipilih.
+ */
+function classIsRelevant(cls, fromStart, toStart) {
+  const period = parseClassPeriod(cls);
+  if (!period) return true;
+  return period.start <= toStart && period.end > fromStart;
 }
 
 function classSuffix(name) {
-  return String(name || "").replace(/^(XII|XI|X)\s+/, "");
+  return String(name || "")
+    .trim()
+    .replace(/^(XII|XI|X)\s+/i, "")
+    .trim()
+    .toLowerCase();
 }
 
 /* ------------------------------- Konteks data ---------------------------- */
@@ -81,52 +109,42 @@ function classAcceptsJurusan(candidate, jurusanId, jurusanSet) {
  *
  * Prioritas:
  * 1. Kelas dengan periode tepat sama dengan tahun ajaran tujuan.
- * 2. Jika ada beberapa kelas dengan periode tepat, pilih yang
- *    memiliki nomor rombel sama dengan kelas asal apabila unik.
- * 3. Jika tidak ada kelas dengan periode tepat, gunakan kelas
- *    dengan cohort yang sama seperti sebelumnya.
- * 4. Jika masih belum ditemukan, pilih nomor rombel yang sama
- *    apabila hanya ada satu pilihan.
+ * 2. Kelas dengan cohort (periode) yang sama seperti kelas asal.
+ * 3. Kelas yang periodenya mencakup tahun ajaran tujuan.
+ * 4. Kelas dengan nomor rombel yang sama apabila hanya ada satu pilihan.
+ *
+ * Pada tiap prioritas, jika ada beberapa kelas, dipilih yang nomor
+ * rombelnya sama dengan kelas asal apabila unik.
  *
  * Pemilihan kelas tujuan tetap bisa diubah secara manual oleh pengguna.
  */
 function suggestDestination(sourceClass, destinations, toYear) {
-  const exactTargetYear = destinations.filter(
-    (item) => item.academicYear === toYear,
-  );
+  const sourceSuffix = classSuffix(sourceClass.name);
 
-  if (exactTargetYear.length === 1) {
-    return exactTargetYear[0].id;
-  }
+  const tiers = [
+    destinations.filter((item) => item.academicYear === toYear),
+    destinations.filter((item) => item.sameCohort),
+    destinations.filter((item) => item.coversTargetYear),
+  ];
 
-  if (exactTargetYear.length > 1) {
-    const sameNumber = exactTargetYear.filter(
-      (item) => classSuffix(item.name) === classSuffix(sourceClass.name),
-    );
-
-    if (sameNumber.length === 1) {
-      return sameNumber[0].id;
+  for (const tier of tiers) {
+    if (tier.length === 1) {
+      return tier[0].id;
     }
-  }
 
-  const sameCohort = destinations.filter((item) => item.sameCohort);
+    if (tier.length > 1) {
+      const sameNumber = tier.filter(
+        (item) => classSuffix(item.name) === sourceSuffix,
+      );
 
-  if (sameCohort.length === 1) {
-    return sameCohort[0].id;
-  }
-
-  if (sameCohort.length > 1) {
-    const sameNumber = sameCohort.filter(
-      (item) => classSuffix(item.name) === classSuffix(sourceClass.name),
-    );
-
-    if (sameNumber.length === 1) {
-      return sameNumber[0].id;
+      if (sameNumber.length === 1) {
+        return sameNumber[0].id;
+      }
     }
   }
 
   const sameNumber = destinations.filter(
-    (item) => classSuffix(item.name) === classSuffix(sourceClass.name),
+    (item) => classSuffix(item.name) === sourceSuffix,
   );
 
   if (sameNumber.length === 1) {
@@ -136,8 +154,17 @@ function suggestDestination(sourceClass, destinations, toYear) {
   return null;
 }
 
+// Urutan tampilan kelas tujuan: yang paling sesuai berada di paling atas.
+function destinationRank(item, toYear) {
+  if (item.academicYear === toYear) return 0;
+  if (item.sameCohort) return 1;
+  if (item.coversTargetYear) return 2;
+  return 3;
+}
+
 async function loadContext(fromYear, transaction) {
   const from = parseSchoolYear(fromYear);
+  const fromStart = from.start;
   const toStart = from.start + 1;
   const toYear = formatSchoolYear(toStart);
   const options = transaction ? { transaction } : {};
@@ -227,27 +254,29 @@ async function loadContext(fromYear, transaction) {
               (candidate) =>
                 candidate.id !== cls.id &&
                 candidate.level === nextLevel &&
-                candidate.status === "Aktif" &&
-                classCoversYear(candidate, toStart) &&
+                DESTINATION_STATUSES.includes(candidate.status) &&
+                classIsRelevant(candidate, fromStart, toStart) &&
                 classAcceptsJurusan(
                   candidate,
                   jurusanId,
                   jurusanSetByClass.get(candidate.id),
                 ),
             )
-            .sort((a, b) =>
-              a.name.localeCompare(b.name, "id", { numeric: true }),
-            )
             .map((candidate) => ({
               id: candidate.id,
               name: candidate.name,
               academicYear: candidate.academicYear,
 
-              // Tetap dipertahankan untuk kompatibilitas struktur data.
-              // Properti ini hanya digunakan untuk prioritas rekomendasi,
+              // Hanya digunakan untuk prioritas rekomendasi dan peringatan,
               // bukan untuk menentukan valid/tidaknya kelas tujuan.
               sameCohort: candidate.academicYear === cls.academicYear,
+              coversTargetYear: classCoversYear(candidate, toStart),
             }))
+            .sort(
+              (a, b) =>
+                destinationRank(a, toYear) - destinationRank(b, toYear) ||
+                a.name.localeCompare(b.name, "id", { numeric: true }),
+            )
         : [];
 
       return {
@@ -338,7 +367,10 @@ function buildPlan(context, payload) {
   const skipRows = [];
   const summary = { promote: 0, stay: 0, alumni: 0, skip: 0 };
   const classErrors = new Set();
+  const periodWarnings = new Set();
+  const occupiedWarnings = new Set();
   const seen = new Set();
+  const actionByStudent = new Map();
 
   const items = Array.isArray(payload.items) ? payload.items : [];
 
@@ -362,6 +394,7 @@ function buildPlan(context, payload) {
     }
 
     seen.add(studentId);
+    actionByStudent.set(studentId, action);
 
     if (action === "skip") {
       summary.skip += 1;
@@ -479,15 +512,21 @@ function buildPlan(context, payload) {
     }
 
     /*
-     * Kelas tujuan sudah dipastikan memenuhi classCoversYear()
-     * ketika daftar destinations dibuat di loadContext().
-     *
-     * Karena itu, perbedaan periode akademik kelas asal dan tujuan
-     * bukan alasan untuk memberikan warning atau menolak kenaikan.
-     *
-     * Validasi kelas tujuan tetap dilakukan melalui destinationId
-     * yang harus ditemukan dalam group.destinations.
+     * Perbedaan periode kelas asal dan tujuan bukan alasan untuk menolak
+     * kenaikan (kelas lama sering dipakai kembali oleh angkatan berikutnya).
+     * Pengguna hanya diberi peringatan agar memeriksa kembali pilihannya.
      */
+    if (!destination.coversTargetYear) {
+      const warningKey = `${group.classId}:${destination.id}`;
+
+      if (!periodWarnings.has(warningKey)) {
+        periodWarnings.add(warningKey);
+
+        warnings.push(
+          `Periode kelas tujuan ${destination.name} (${destination.academicYear}) tidak mencakup tahun ajaran ${context.toYear}. Pastikan kelas tersebut memang akan digunakan oleh siswa ${group.className}.`,
+        );
+      }
+    }
 
     summary.promote += 1;
 
@@ -499,6 +538,40 @@ function buildPlan(context, payload) {
       toLevel: group.nextLevel,
       toStatus: "Aktif",
     });
+  });
+
+  /*
+   * Peringatan kelas tujuan yang masih berisi siswa aktif lain
+   * (tinggal kelas, tidak diproses, sudah diproses, atau tidak ikut batch).
+   * Hanya informasi; tidak menghalangi proses kenaikan.
+   */
+  const usedDestinationIds = [
+    ...new Set(
+      rows
+        .filter((row) => row.action === ACTION_LABEL.promote)
+        .map((row) => row.toClassId),
+    ),
+  ];
+
+  usedDestinationIds.forEach((destinationId) => {
+    const occupiedGroup = context.groups.find(
+      (group) => group.classId === destinationId,
+    );
+
+    if (!occupiedGroup || occupiedWarnings.has(destinationId)) return;
+
+    const remainingStudents = occupiedGroup.students.filter(
+      (student) =>
+        student.locked || actionByStudent.get(student.id) !== "promote",
+    );
+
+    if (remainingStudents.length > 0) {
+      occupiedWarnings.add(destinationId);
+
+      warnings.push(
+        `Kelas tujuan ${occupiedGroup.className} masih berisi ${remainingStudents.length} siswa aktif lain yang tidak ikut naik kelas atau lulus pada proses ini, sehingga kelas tersebut akan berisi siswa dari beberapa angkatan.`,
+      );
+    }
   });
 
   if (!rows.length && !errors.length) {
@@ -676,6 +749,20 @@ async function commit(req, res) {
         await Student.update(
           { classId },
           { where: { id: ids }, transaction },
+        );
+      }
+
+      // Kelas tujuan berstatus "Akan datang" menjadi Aktif setelah menerima siswa
+      if (idsByDestination.size) {
+        await Class.update(
+          { status: "Aktif" },
+          {
+            where: {
+              id: [...idsByDestination.keys()],
+              status: "Akan datang",
+            },
+            transaction,
+          },
         );
       }
 
