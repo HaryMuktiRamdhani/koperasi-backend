@@ -17,6 +17,7 @@ const ACTIONS = ["promote", "stay", "skip"];
 const MAX_ITEMS = 5000;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// Kunci advisory lock agar dua proses kenaikan tidak berjalan bersamaan.
 const PROMOTION_LOCK_KEY = 20260303;
 
 const ACTION_LABEL = {
@@ -31,14 +32,10 @@ const ACTION_LABEL = {
 function parseSchoolYear(value) {
   const match =
     typeof value === "string" ? value.match(/^(\d{4})\/(\d{4})$/) : null;
-
   if (!match) return null;
-
   const start = Number(match[1]);
   const end = Number(match[2]);
-
-  if (end <= start || start < 2000 || start > 2100) return null;
-
+  if (end !== start + 1 || start < 2000 || start > 2100) return null;
   return { start, end };
 }
 
@@ -46,81 +43,101 @@ function formatSchoolYear(start) {
   return `${start}/${start + 1}`;
 }
 
-// Tahun ajaran dimulai bulan Juli.
+// Tahun ajaran dimulai bulan Juli
 function defaultSchoolYearStart(now = new Date()) {
-  return now.getMonth() >= 6
-    ? now.getFullYear()
-    : now.getFullYear() - 1;
+  return now.getMonth() >= 6 ? now.getFullYear() : now.getFullYear() - 1;
 }
 
-// Menggeser periode angkatan satu tahun ke depan.
-// Contoh: 2026/2029 menjadi 2027/2030.
-function advanceGenerationYear(value) {
-  const years = parseSchoolYear(value);
-
-  if (!years) return null;
-
-  return `${years.start + 1}/${years.end + 1}`;
+// Periode kelas (mis. 2025/2028 atau 2026/2027) mencakup tahun ajaran tertentu
+function classCoversYear(cls, startYear) {
+  const match =
+    typeof cls.academicYear === "string"
+      ? cls.academicYear.match(/^(\d{4})\/(\d{4})$/)
+      : null;
+  if (!match) return false;
+  return Number(match[1]) <= startYear && startYear < Number(match[2]);
 }
 
-// Mengambil identitas rombel tanpa tingkat kelas.
-// Contoh: X MPLB 1 dan XI MPLB 1 menghasilkan MPLB 1.
 function classSuffix(name) {
-  return String(name || "")
-    .trim()
-    .replace(/^(XII|XI|X)\s+/i, "")
-    .trim()
-    .toLowerCase();
+  return String(name || "").replace(/^(XII|XI|X)\s+/, "");
 }
 
 /* ------------------------------- Konteks data ---------------------------- */
 
 function groupJurusanId(cls, jurusanSet) {
   if (cls.jurusanId) return cls.jurusanId;
-
-  return jurusanSet && jurusanSet.size === 1
-    ? [...jurusanSet][0]
-    : null;
+  return jurusanSet && jurusanSet.size === 1 ? [...jurusanSet][0] : null;
 }
 
-// Mengikuti aturan validateClassJurusan pada studentController.
+// Mengikuti aturan validateClassJurusan pada studentController
 function classAcceptsJurusan(candidate, jurusanId, jurusanSet) {
   if (!jurusanId) return false;
-
-  if (candidate.jurusanId) {
-    return candidate.jurusanId === jurusanId;
-  }
-
+  if (candidate.jurusanId) return candidate.jurusanId === jurusanId;
   return !jurusanSet || jurusanSet.size === 0 || jurusanSet.has(jurusanId);
 }
 
 /**
- * Menentukan kelas tujuan berdasarkan identitas rombel.
+ * Menentukan kelas tujuan yang disarankan.
  *
- * Contoh:
- * X MPLB 1  -> XI MPLB 1
- * XI MPLB 1 -> XII MPLB 1
+ * Prioritas:
+ * 1. Kelas dengan periode tepat sama dengan tahun ajaran tujuan.
+ * 2. Jika ada beberapa kelas dengan periode tepat, pilih yang
+ *    memiliki nomor rombel sama dengan kelas asal apabila unik.
+ * 3. Jika tidak ada kelas dengan periode tepat, gunakan kelas
+ *    dengan cohort yang sama seperti sebelumnya.
+ * 4. Jika masih belum ditemukan, pilih nomor rombel yang sama
+ *    apabila hanya ada satu pilihan.
  *
- * Tahun angkatan kelas tujuan tidak digunakan sebagai penentu,
- * karena record kelas memang digunakan kembali setiap tahun.
+ * Pemilihan kelas tujuan tetap bisa diubah secara manual oleh pengguna.
  */
-function suggestDestination(sourceClass, destinations) {
-  const sourceSuffix = classSuffix(sourceClass.name);
-
-  const sameNumber = destinations.filter(
-    (item) => classSuffix(item.name) === sourceSuffix,
+function suggestDestination(sourceClass, destinations, toYear) {
+  const exactTargetYear = destinations.filter(
+    (item) => item.academicYear === toYear,
   );
 
-  return sameNumber.length === 1 ? sameNumber[0].id : null;
+  if (exactTargetYear.length === 1) {
+    return exactTargetYear[0].id;
+  }
+
+  if (exactTargetYear.length > 1) {
+    const sameNumber = exactTargetYear.filter(
+      (item) => classSuffix(item.name) === classSuffix(sourceClass.name),
+    );
+
+    if (sameNumber.length === 1) {
+      return sameNumber[0].id;
+    }
+  }
+
+  const sameCohort = destinations.filter((item) => item.sameCohort);
+
+  if (sameCohort.length === 1) {
+    return sameCohort[0].id;
+  }
+
+  if (sameCohort.length > 1) {
+    const sameNumber = sameCohort.filter(
+      (item) => classSuffix(item.name) === classSuffix(sourceClass.name),
+    );
+
+    if (sameNumber.length === 1) {
+      return sameNumber[0].id;
+    }
+  }
+
+  const sameNumber = destinations.filter(
+    (item) => classSuffix(item.name) === classSuffix(sourceClass.name),
+  );
+
+  if (sameNumber.length === 1) {
+    return sameNumber[0].id;
+  }
+
+  return null;
 }
 
 async function loadContext(fromYear, transaction) {
   const from = parseSchoolYear(fromYear);
-
-  if (!from) {
-    throw new ServiceError(400, "Tahun ajaran tidak valid.");
-  }
-
   const toStart = from.start + 1;
   const toYear = formatSchoolYear(toStart);
   const options = transaction ? { transaction } : {};
@@ -132,15 +149,7 @@ async function loadContext(fromYear, transaction) {
   });
 
   const students = await Student.findAll({
-    attributes: [
-      "id",
-      "nis",
-      "name",
-      "classId",
-      "jurusanId",
-      "generation",
-      "status",
-    ],
+    attributes: ["id", "nis", "name", "classId", "jurusanId", "generation", "status"],
     order: [["name", "ASC"]],
     raw: true,
     ...options,
@@ -156,27 +165,18 @@ async function loadContext(fromYear, transaction) {
     where: {
       [Op.and]: [
         {
-          [Op.or]: [
-            { fromAcademicYear: fromYear },
-            { toAcademicYear: toYear },
-          ],
+          [Op.or]: [{ fromAcademicYear: fromYear }, { toAcademicYear: toYear }],
         },
+        // Keputusan "Tidak Diproses" hanya riwayat; tidak mengunci siswa
         { action: { [Op.ne]: ACTION_LABEL.skip } },
       ],
     },
-    attributes: [
-      "studentId",
-      "action",
-      "fromAcademicYear",
-      "toAcademicYear",
-    ],
+    attributes: ["studentId", "action", "fromAcademicYear", "toAcademicYear"],
     raw: true,
     ...options,
   });
 
-  const jurusanById = new Map(
-    jurusanList.map((item) => [item.id, item]),
-  );
+  const jurusanById = new Map(jurusanList.map((item) => [item.id, item]));
 
   const processedByStudent = new Map(
     processed.map((item) => [item.studentId, item]),
@@ -190,9 +190,7 @@ async function loadContext(fromYear, transaction) {
       jurusanSetByClass.set(student.classId, new Set());
     }
 
-    if (student.jurusanId) {
-      jurusanSetByClass.get(student.classId).add(student.jurusanId);
-    }
+    jurusanSetByClass.get(student.classId).add(student.jurusanId);
 
     if (student.status === "Aktif") {
       if (!activeStudentsByClass.has(student.classId)) {
@@ -223,8 +221,6 @@ async function loadContext(fromYear, transaction) {
       const jurusan = jurusanId ? jurusanById.get(jurusanId) : null;
       const nextLevel = NEXT_LEVEL[cls.level];
 
-      const sourceSuffix = classSuffix(cls.name);
-
       const destinations = nextLevel
         ? classes
             .filter(
@@ -232,7 +228,7 @@ async function loadContext(fromYear, transaction) {
                 candidate.id !== cls.id &&
                 candidate.level === nextLevel &&
                 candidate.status === "Aktif" &&
-                classSuffix(candidate.name) === sourceSuffix &&
+                classCoversYear(candidate, toStart) &&
                 classAcceptsJurusan(
                   candidate,
                   jurusanId,
@@ -246,6 +242,10 @@ async function loadContext(fromYear, transaction) {
               id: candidate.id,
               name: candidate.name,
               academicYear: candidate.academicYear,
+
+              // Tetap dipertahankan untuk kompatibilitas struktur data.
+              // Properti ini hanya digunakan untuk prioritas rekomendasi,
+              // bukan untuk menentukan valid/tidaknya kelas tujuan.
               sameCohort: candidate.academicYear === cls.academicYear,
             }))
         : [];
@@ -261,7 +261,11 @@ async function loadContext(fromYear, transaction) {
         jurusanCode: jurusan ? jurusan.kode : null,
         mixedJurusan: !jurusanId,
         destinations,
-        suggestedDestinationId: suggestDestination(cls, destinations),
+        suggestedDestinationId: suggestDestination(
+          cls,
+          destinations,
+          toYear,
+        ),
         students: activeStudentsByClass.get(cls.id).map((student) => {
           const record = processedByStudent.get(student.id);
 
@@ -301,7 +305,7 @@ async function loadContext(fromYear, transaction) {
 
 /* ------------------------------ Rencana & preview ------------------------ */
 
-// Salinan data siswa/jurusan saat proses, agar riwayat tetap utuh walau data berubah.
+// Salinan data siswa/jurusan saat proses, agar riwayat tetap utuh walau data berubah
 function snapshotFields(context, student) {
   const jurusan = context.jurusanById.get(student.jurusanId);
 
@@ -322,7 +326,6 @@ function baseRow(context, student, group) {
     fromClassId: group.classId,
     fromClassName: group.className,
     fromLevel: group.level,
-    fromClassAcademicYear: group.academicYear,
     fromStatus: "Aktif",
     ...snapshotFields(context, student),
   };
@@ -335,9 +338,7 @@ function buildPlan(context, payload) {
   const skipRows = [];
   const summary = { promote: 0, stay: 0, alumni: 0, skip: 0 };
   const classErrors = new Set();
-  const destinationErrors = new Set();
   const seen = new Set();
-  const actionByStudent = new Map();
 
   const items = Array.isArray(payload.items) ? payload.items : [];
 
@@ -361,11 +362,11 @@ function buildPlan(context, payload) {
     }
 
     seen.add(studentId);
-    actionByStudent.set(studentId, action);
 
     if (action === "skip") {
       summary.skip += 1;
 
+      // Keputusan "Tidak Diproses" dicatat sebagai riwayat (tanpa mengubah siswa)
       const skipEntry = context.studentIndex.get(studentId);
 
       if (skipEntry && !skipEntry.student.locked) {
@@ -454,7 +455,7 @@ function buildPlan(context, payload) {
         errors.push(
           group.destinations.length
             ? `Kelas tujuan untuk ${group.className} belum dipilih.`
-            : `Kelas ${group.nextLevel} dengan rombel yang sama untuk ${group.className} belum tersedia. Tambahkan kelas tersebut di halaman Kelas.`,
+            : `Kelas tujuan ${group.nextLevel} tahun ajaran ${context.toYear} untuk ${group.className} belum tersedia. Tambahkan kelas tersebut di halaman Kelas.`,
         );
       }
 
@@ -470,12 +471,23 @@ function buildPlan(context, payload) {
         classErrors.add(group.classId);
 
         errors.push(
-          `Kelas tujuan untuk ${group.className} tidak valid atau tidak tersedia. Pastikan tingkat, jurusan, dan nomor rombel sesuai.`,
+          `Kelas tujuan untuk ${group.className} tidak valid atau tidak tersedia.`,
         );
       }
 
       return;
     }
+
+    /*
+     * Kelas tujuan sudah dipastikan memenuhi classCoversYear()
+     * ketika daftar destinations dibuat di loadContext().
+     *
+     * Karena itu, perbedaan periode akademik kelas asal dan tujuan
+     * bukan alasan untuk memberikan warning atau menolak kenaikan.
+     *
+     * Validasi kelas tujuan tetap dilakukan melalui destinationId
+     * yang harus ditemukan dalam group.destinations.
+     */
 
     summary.promote += 1;
 
@@ -487,49 +499,6 @@ function buildPlan(context, payload) {
       toLevel: group.nextLevel,
       toStatus: "Aktif",
     });
-  });
-
-  /*
-   * Validasi rotasi kelas:
-   * Kelas tujuan harus kosong setelah seluruh siswa di dalamnya
-   * diproses pada batch yang sama.
-   *
-   * Jika masih ada siswa yang tinggal, tidak diproses, terkunci,
-   * atau tidak ikut dalam batch, kelas tersebut tidak boleh dipakai
-   * oleh angkatan berikutnya.
-   */
-  const usedDestinationIds = [
-    ...new Set(
-      rows
-        .filter((row) => row.action === ACTION_LABEL.promote)
-        .map((row) => row.toClassId),
-    ),
-  ];
-
-  usedDestinationIds.forEach((destinationId) => {
-    const occupiedGroup = context.groups.find(
-      (group) => group.classId === destinationId,
-    );
-
-    if (!occupiedGroup) return;
-
-    const remainingStudents = occupiedGroup.students.filter((student) => {
-      const selectedAction = actionByStudent.get(student.id);
-
-      return selectedAction !== "promote" || student.locked;
-    });
-
-    if (remainingStudents.length > 0) {
-      const key = destinationId;
-
-      if (!destinationErrors.has(key)) {
-        destinationErrors.add(key);
-
-        errors.push(
-          `Kelas tujuan ${occupiedGroup.className} masih ditempati ${remainingStudents.length} siswa yang belum naik kelas atau belum diproses. Proses seluruh siswa di kelas tersebut terlebih dahulu agar kelas bisa digunakan kembali.`,
-        );
-      }
-    }
   });
 
   if (!rows.length && !errors.length) {
@@ -558,11 +527,7 @@ function parsePayload(body) {
 
   const items = body.items;
 
-  if (
-    !Array.isArray(items) ||
-    items.length === 0 ||
-    items.length > MAX_ITEMS
-  ) {
+  if (!Array.isArray(items) || items.length === 0 || items.length > MAX_ITEMS) {
     throw new ServiceError(400, "Daftar siswa kosong atau terlalu banyak.");
   }
 
@@ -578,10 +543,7 @@ function parsePayload(body) {
 
   const destinations = body.destinations || {};
 
-  if (
-    typeof destinations !== "object" ||
-    Array.isArray(destinations)
-  ) {
+  if (typeof destinations !== "object" || Array.isArray(destinations)) {
     throw new ServiceError(400, "Data kelas tujuan tidak valid.");
   }
 
@@ -622,10 +584,6 @@ async function getEligible(req, res) {
       groups: context.groups,
     });
   } catch (error) {
-    if (error instanceof ServiceError) {
-      return res.status(error.status).json({ message: error.message });
-    }
-
     console.error(error);
 
     res.status(500).json({
@@ -674,11 +632,13 @@ async function commit(req, res) {
     ];
 
     const result = await sequelize.transaction(async (transaction) => {
+      // Satu antrean untuk semua proses kenaikan (dilepas saat commit/rollback)
       await sequelize.query("SELECT pg_advisory_xact_lock(:key)", {
         replacements: { key: PROMOTION_LOCK_KEY },
         transaction,
       });
 
+      // Kunci baris siswa agar tidak berubah oleh proses lain selama transaksi
       if (studentIds.length) {
         await Student.findAll({
           attributes: ["id"],
@@ -688,18 +648,16 @@ async function commit(req, res) {
         });
       }
 
-      // Validasi ulang menggunakan data terbaru di dalam transaksi.
+      // Validasi ulang di dalam transaksi dengan data terbaru
       const context = await loadContext(fromYear, transaction);
       const plan = buildPlan(context, { items, destinations });
 
-      if (!plan.valid) {
-        return { plan, applied: false };
-      }
+      if (!plan.valid) return { plan, applied: false };
 
       const batchId = crypto.randomUUID();
 
+      // 1. Pindahkan siswa yang naik kelas (dikelompokkan per kelas tujuan)
       const idsByDestination = new Map();
-      const destinationYearUpdates = new Map();
       const alumniIds = [];
 
       plan.rows.forEach((row) => {
@@ -709,109 +667,28 @@ async function commit(req, res) {
           }
 
           idsByDestination.get(row.toClassId).push(row.studentId);
-
-          // Angkatan kelas tujuan mengikuti angkatan kelas asal.
-          destinationYearUpdates.set(
-            row.toClassId,
-            row.fromClassAcademicYear,
-          );
         } else if (row.action === ACTION_LABEL.alumni) {
           alumniIds.push(row.studentId);
         }
       });
 
-      // 1. Pindahkan siswa naik kelas ke record kelas tingkat berikutnya.
       for (const [classId, ids] of idsByDestination) {
         await Student.update(
           { classId },
-          {
-            where: { id: ids },
-            transaction,
-          },
+          { where: { id: ids }, transaction },
         );
       }
 
-      // 2. Siswa kelas XII ditandai Lulus.
+      // 2. Siswa kelas XII ditandai Lulus (calon alumni); kelasnya tidak diubah
       if (alumniIds.length) {
         await Student.update(
           { status: "Lulus" },
-          {
-            where: { id: alumniIds },
-            transaction,
-          },
+          { where: { id: alumniIds }, transaction },
         );
       }
 
-      /*
-       * 3. Perbarui tahun angkatan kelas tujuan.
-       *
-       * Contoh:
-       * XI MPLB 1 yang sebelumnya 2025/2028 menjadi 2026/2029
-       * setelah menerima siswa X MPLB 1 angkatan 2026/2029.
-       *
-       * XII MPLB 1 yang sebelumnya 2024/2027 menjadi 2025/2028
-       * setelah menerima siswa XI MPLB 1 angkatan 2025/2028.
-       */
-      for (const [classId, academicYear] of destinationYearUpdates) {
-        if (!academicYear) continue;
-
-        await Class.update(
-          { academicYear },
-          {
-            where: { id: classId },
-            transaction,
-          },
-        );
-      }
-
-      /*
-       * 4. Siapkan kelas X untuk angkatan berikutnya.
-       *
-       * Kelas X hanya diperbarui jika seluruh siswa aktif di kelas
-       * tersebut sudah naik kelas. Jika ada siswa tinggal kelas atau
-       * tidak diproses, tahun angkatan kelas tidak diubah.
-       */
-      const sourceXGroups = context.groups.filter(
-        (group) => group.level === "X",
-      );
-
-      for (const group of sourceXGroups) {
-        const allStudentsPromoted =
-          group.students.length > 0 &&
-          group.students.every(
-            (student) =>
-              !student.locked &&
-              actionByStudentValue(items, student.id) === "promote",
-          );
-
-        if (!allStudentsPromoted) continue;
-
-        const remainingActiveStudents = await Student.count({
-          where: {
-            classId: group.classId,
-            status: "Aktif",
-          },
-          transaction,
-        });
-
-        if (remainingActiveStudents > 0) continue;
-
-        const nextGeneration = advanceGenerationYear(
-          group.academicYear,
-        );
-
-        if (!nextGeneration) continue;
-
-        await Class.update(
-          { academicYear: nextGeneration },
-          {
-            where: { id: group.classId },
-            transaction,
-          },
-        );
-      }
-
-      // 5. Simpan riwayat kelas lama dan keputusan siswa.
+      // 3. Simpan riwayat kelas lama sebelum/bersamaan dengan perubahan
+      //    (termasuk keputusan "Tidak Diproses")
       const processedBy = await User.findByPk(req.user.id, {
         attributes: ["name"],
         transaction,
@@ -885,12 +762,6 @@ async function commit(req, res) {
       message: "Gagal memproses kenaikan siswa",
     });
   }
-}
-
-// Mengambil aksi siswa dari payload tanpa mengubah data aslinya.
-function actionByStudentValue(items, studentId) {
-  const item = items.find((entry) => entry.studentId === studentId);
-  return item ? item.action : null;
 }
 
 module.exports = {
