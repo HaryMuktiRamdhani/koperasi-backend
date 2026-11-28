@@ -17,6 +17,10 @@ const ACTIONS = ["promote", "stay", "skip"];
 // untuk tahun ajaran berikutnya). Kelas "Akan datang" otomatis menjadi Aktif
 // ketika sudah menerima siswa.
 const DESTINATION_STATUSES = ["Aktif", "Akan datang"];
+// Nilai khusus pada pilihan kelas tujuan: kelas tujuan dibuat otomatis
+const AUTO_DESTINATION = "auto";
+// Kelas asal yang sudah kosong setelah proses kenaikan otomatis diarsipkan
+const ARCHIVED_CLASS_STATUS = "Lulus/Arsip";
 const MAX_ITEMS = 5000;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -90,6 +94,23 @@ function classSuffix(name) {
     .toLowerCase();
 }
 
+/*
+ * Kelas tujuan otomatis: tingkat berikutnya, nomor rombel yang sama,
+ * jurusan yang sama, dan angkatan (periode) yang sama dengan kelas asal.
+ * Contoh: "XI MPLB 1" (2025/2028) -> "XII MPLB 1" (2025/2028).
+ */
+function buildAutoDestination(cls, nextLevel) {
+  const rawSuffix = String(cls.name || "")
+    .trim()
+    .replace(/^(XII|XI|X)\s+/i, "")
+    .trim();
+
+  return {
+    name: rawSuffix ? `${nextLevel} ${rawSuffix}` : nextLevel,
+    academicYear: cls.academicYear,
+  };
+}
+
 /* ------------------------------- Konteks data ---------------------------- */
 
 function groupJurusanId(cls, jurusanSet) {
@@ -109,49 +130,55 @@ function classAcceptsJurusan(candidate, jurusanId, jurusanSet) {
  *
  * Prioritas:
  * 1. Kelas dengan periode tepat sama dengan tahun ajaran tujuan.
- * 2. Kelas dengan cohort (periode) yang sama seperti kelas asal.
- * 3. Kelas yang periodenya mencakup tahun ajaran tujuan.
- * 4. Kelas dengan nomor rombel yang sama apabila hanya ada satu pilihan.
+ * 2. Kelas dengan angkatan (periode) yang sama seperti kelas asal.
+ * 3. Kelas tujuan baru yang dibuat otomatis (angkatan sama dengan kelas asal).
+ * 4. Kelas yang periodenya mencakup tahun ajaran tujuan.
+ * 5. Kelas dengan nomor rombel yang sama apabila hanya ada satu pilihan.
  *
- * Pada tiap prioritas, jika ada beberapa kelas, dipilih yang nomor
- * rombelnya sama dengan kelas asal apabila unik.
+ * Pada tiap prioritas kelas yang sudah ada, jika ada beberapa kelas,
+ * dipilih yang nomor rombelnya sama dengan kelas asal apabila unik.
  *
  * Pemilihan kelas tujuan tetap bisa diubah secara manual oleh pengguna.
  */
-function suggestDestination(sourceClass, destinations, toYear) {
+function suggestDestination(sourceClass, destinations, toYear, autoDestination) {
   const sourceSuffix = classSuffix(sourceClass.name);
 
-  const tiers = [
-    destinations.filter((item) => item.academicYear === toYear),
-    destinations.filter((item) => item.sameCohort),
-    destinations.filter((item) => item.coversTargetYear),
-  ];
-
-  for (const tier of tiers) {
-    if (tier.length === 1) {
-      return tier[0].id;
-    }
+  const pickFromTier = (tier) => {
+    if (tier.length === 1) return tier[0].id;
 
     if (tier.length > 1) {
       const sameNumber = tier.filter(
         (item) => classSuffix(item.name) === sourceSuffix,
       );
 
-      if (sameNumber.length === 1) {
-        return sameNumber[0].id;
-      }
+      if (sameNumber.length === 1) return sameNumber[0].id;
     }
-  }
+
+    return null;
+  };
+
+  const exactYear = pickFromTier(
+    destinations.filter((item) => item.academicYear === toYear),
+  );
+  if (exactYear) return exactYear;
+
+  const sameCohort = pickFromTier(
+    destinations.filter((item) => item.sameCohort),
+  );
+  if (sameCohort) return sameCohort;
+
+  if (autoDestination) return AUTO_DESTINATION;
+
+  const covering = pickFromTier(
+    destinations.filter((item) => item.coversTargetYear),
+  );
+  if (covering) return covering;
 
   const sameNumber = destinations.filter(
     (item) => classSuffix(item.name) === sourceSuffix,
   );
 
-  if (sameNumber.length === 1) {
-    return sameNumber[0].id;
-  }
-
-  return null;
+  return sameNumber.length === 1 ? sameNumber[0].id : null;
 }
 
 // Urutan tampilan kelas tujuan: yang paling sesuai berada di paling atas.
@@ -279,6 +306,23 @@ async function loadContext(fromYear, transaction) {
             )
         : [];
 
+      // Kelas tujuan otomatis hanya ditawarkan apabila jurusan jelas dan
+      // kelas dengan nama + angkatan yang sama belum ada.
+      let autoDestination = null;
+
+      if (nextLevel && jurusanId) {
+        const candidate = buildAutoDestination(cls, nextLevel);
+
+        const alreadyExists = destinations.some(
+          (item) =>
+            item.name.trim().toLowerCase() ===
+              candidate.name.toLowerCase() &&
+            item.academicYear === candidate.academicYear,
+        );
+
+        autoDestination = alreadyExists ? null : candidate;
+      }
+
       return {
         classId: cls.id,
         className: cls.name,
@@ -290,10 +334,12 @@ async function loadContext(fromYear, transaction) {
         jurusanCode: jurusan ? jurusan.kode : null,
         mixedJurusan: !jurusanId,
         destinations,
+        autoDestination,
         suggestedDestinationId: suggestDestination(
           cls,
           destinations,
           toYear,
+          autoDestination,
         ),
         students: activeStudentsByClass.get(cls.id).map((student) => {
           const record = processedByStudent.get(student.id);
@@ -495,9 +541,25 @@ function buildPlan(context, payload) {
       return;
     }
 
-    const destination = group.destinations.find(
-      (item) => item.id === destinationId,
-    );
+    let destination = null;
+    let autoCreated = false;
+
+    if (destinationId === AUTO_DESTINATION) {
+      if (group.autoDestination) {
+        autoCreated = true;
+
+        destination = {
+          id: null,
+          name: group.autoDestination.name,
+          academicYear: group.autoDestination.academicYear,
+          coversTargetYear: true,
+        };
+      }
+    } else {
+      destination = group.destinations.find(
+        (item) => item.id === destinationId,
+      );
+    }
 
     if (!destination) {
       if (!classErrors.has(group.classId)) {
@@ -511,12 +573,22 @@ function buildPlan(context, payload) {
       return;
     }
 
-    /*
-     * Perbedaan periode kelas asal dan tujuan bukan alasan untuk menolak
-     * kenaikan (kelas lama sering dipakai kembali oleh angkatan berikutnya).
-     * Pengguna hanya diberi peringatan agar memeriksa kembali pilihannya.
-     */
-    if (!destination.coversTargetYear) {
+    if (autoCreated) {
+      const noticeKey = `auto:${group.classId}`;
+
+      if (!periodWarnings.has(noticeKey)) {
+        periodWarnings.add(noticeKey);
+
+        warnings.push(
+          `Kelas ${destination.name} (${destination.academicYear}) akan dibuat otomatis sebagai kelas tujuan ${group.className}.`,
+        );
+      }
+    } else if (!destination.coversTargetYear) {
+      /*
+       * Perbedaan periode kelas asal dan tujuan bukan alasan untuk menolak
+       * kenaikan (kelas lama sering dipakai kembali oleh angkatan berikutnya).
+       * Pengguna hanya diberi peringatan agar memeriksa kembali pilihannya.
+       */
       const warningKey = `${group.classId}:${destination.id}`;
 
       if (!periodWarnings.has(warningKey)) {
@@ -537,6 +609,7 @@ function buildPlan(context, payload) {
       toClassName: destination.name,
       toLevel: group.nextLevel,
       toStatus: "Aktif",
+      autoCreated,
     });
   });
 
@@ -548,7 +621,7 @@ function buildPlan(context, payload) {
   const usedDestinationIds = [
     ...new Set(
       rows
-        .filter((row) => row.action === ACTION_LABEL.promote)
+        .filter((row) => row.action === ACTION_LABEL.promote && row.toClassId)
         .map((row) => row.toClassId),
     ),
   ];
@@ -624,7 +697,7 @@ function parsePayload(body) {
     if (
       !UUID_PATTERN.test(classId) ||
       typeof destinationId !== "string" ||
-      !UUID_PATTERN.test(destinationId)
+      (destinationId !== AUTO_DESTINATION && !UUID_PATTERN.test(destinationId))
     ) {
       throw new ServiceError(400, "Data kelas tujuan tidak valid.");
     }
@@ -729,6 +802,53 @@ async function commit(req, res) {
 
       const batchId = crypto.randomUUID();
 
+      // 0. Buat kelas tujuan otomatis (atau pakai kelas yang sudah ada)
+      const autoClassByGroup = new Map();
+      let createdClasses = 0;
+
+      for (const row of plan.rows) {
+        if (!row.autoCreated) continue;
+
+        if (!autoClassByGroup.has(row.fromClassId)) {
+          const group = context.groups.find(
+            (item) => item.classId === row.fromClassId,
+          );
+
+          let target = await Class.findOne({
+            where: {
+              name: group.autoDestination.name,
+              level: group.nextLevel,
+              academicYear: group.autoDestination.academicYear,
+              jurusanId: group.jurusanId,
+              status: { [Op.in]: DESTINATION_STATUSES },
+            },
+            transaction,
+          });
+
+          if (!target) {
+            target = await Class.create(
+              {
+                name: group.autoDestination.name,
+                level: group.nextLevel,
+                academicYear: group.autoDestination.academicYear,
+                jurusanId: group.jurusanId,
+                status: "Aktif",
+              },
+              { transaction },
+            );
+
+            createdClasses += 1;
+          }
+
+          autoClassByGroup.set(row.fromClassId, target);
+        }
+
+        const target = autoClassByGroup.get(row.fromClassId);
+
+        row.toClassId = target.id;
+        row.toClassName = target.name;
+      }
+
       // 1. Pindahkan siswa yang naik kelas (dikelompokkan per kelas tujuan)
       const idsByDestination = new Map();
       const alumniIds = [];
@@ -774,6 +894,33 @@ async function commit(req, res) {
         );
       }
 
+      // 2b. Kelas asal yang sudah kosong (semua siswanya naik/lulus) diarsipkan
+      const emptiedClassIds = [
+        ...new Set(
+          plan.rows
+            .filter(
+              (row) =>
+                row.action === ACTION_LABEL.promote ||
+                row.action === ACTION_LABEL.alumni,
+            )
+            .map((row) => row.fromClassId),
+        ),
+      ];
+
+      for (const classId of emptiedClassIds) {
+        const remaining = await Student.count({
+          where: { classId, status: "Aktif" },
+          transaction,
+        });
+
+        if (remaining === 0) {
+          await Class.update(
+            { status: ARCHIVED_CLASS_STATUS },
+            { where: { id: classId, status: "Aktif" }, transaction },
+          );
+        }
+      }
+
       // 3. Simpan riwayat kelas lama sebelum/bersamaan dengan perubahan
       //    (termasuk keputusan "Tidak Diproses")
       const processedBy = await User.findByPk(req.user.id, {
@@ -810,6 +957,7 @@ async function commit(req, res) {
       return {
         plan,
         applied: true,
+        createdClasses,
         batchId,
         fromAcademicYear: context.fromYear,
         toAcademicYear: context.toYear,
@@ -830,6 +978,7 @@ async function commit(req, res) {
       toAcademicYear: result.toAcademicYear,
       summary: result.plan.summary,
       processed: result.plan.rows.length,
+      createdClasses: result.createdClasses,
     });
   } catch (error) {
     if (error instanceof ServiceError) {
