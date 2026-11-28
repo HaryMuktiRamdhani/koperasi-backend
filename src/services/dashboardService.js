@@ -10,8 +10,14 @@ async function getDashboardStats() {
     unpaidBills,
     income,
   ] = await Promise.all([
-    Student.count(),
-    Item.count(),
+    // Hanya siswa aktif, sama dengan halaman Siswa.
+    // Alumni (Lulus), Pindah, dan Keluar tidak ikut dihitung.
+    Student.count({ where: { status: "Aktif" } }),
+
+    // Hanya barang aktif. Barang Nonaktif dan "Akan Datang"
+    // belum tersedia sehingga tidak ikut dihitung.
+    Item.count({ where: { status: "Aktif" } }),
+
     Bill.count(),
     Bill.count({ where: { status: "Lunas" } }),
     Bill.count({ where: { status: { [Op.ne]: "Lunas" } } }),

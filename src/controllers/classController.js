@@ -1,4 +1,5 @@
 
+const { fn, col } = require("sequelize");
 const { Class, Student, Jurusan } = require("../../models");
 
 const CLASS_STATUSES = ["Aktif", "Akan datang", "Nonaktif", "Lulus/Arsip"];
@@ -6,58 +7,102 @@ const CLASS_STATUSES = ["Aktif", "Akan datang", "Nonaktif", "Lulus/Arsip"];
 function parseAcademicYear(value) {
   const match =
     typeof value === "string" ? value.match(/^(\d{4})\/(\d{4})$/) : null;
-  return match ? { start: Number(match[1]), end: Number(match[2]) } : null;
+
+  return match
+    ? { start: Number(match[1]), end: Number(match[2]) }
+    : null;
 }
 
-function validateClassInput({ level, jurusanId, name, academicYear, status }) {
-  if (!["X", "XI", "XII"].includes(level))
+function validateClassInput({
+  level,
+  jurusanId,
+  name,
+  academicYear,
+  status,
+}) {
+  if (!["X", "XI", "XII"].includes(level)) {
     return "Tingkat harus X, XI, atau XII.";
-  if (!jurusanId || !name || !academicYear)
+  }
+
+  if (!jurusanId || !name || !academicYear) {
     return "Nama, tingkat, jurusan, dan tahun ajaran wajib diisi.";
-  if (status && !CLASS_STATUSES.includes(status))
+  }
+
+  if (status && !CLASS_STATUSES.includes(status)) {
     return "Status kelas tidak valid.";
+  }
+
   const years = parseAcademicYear(academicYear);
-  if (!years || years.end <= years.start)
+
+  if (!years || years.end <= years.start) {
     return "Format tahun ajaran harus YYYY/YYYY dan tahun selesai harus lebih besar.";
+  }
+
   return null;
 }
 
 async function getAll(req, res) {
   try {
-    const data = await Class.findAll({
-      include: [
-        {
-          model: Student,
-          attributes: ["jurusanId", "status"],
-          required: false,
+    const [data, studentCounts] = await Promise.all([
+      Class.findAll({
+        include: [
+          {
+            model: Student,
+            attributes: ["jurusanId"],
+            required: false,
+          },
+          {
+            model: Jurusan,
+            attributes: ["id", "nama", "kode"],
+            required: false,
+          },
+        ],
+        order: [["name", "ASC"]],
+      }),
+
+      // Hitung jumlah siswa aktif berdasarkan kelas saat ini.
+      Student.findAll({
+        attributes: [
+          "classId",
+          [fn("COUNT", col("id")), "studentCount"],
+        ],
+        where: {
+          status: "Aktif",
         },
-        {
-          model: Jurusan,
-          attributes: ["id", "nama", "kode"],
-          required: false,
-        },
-      ],
-      order: [["name", "ASC"]],
-    });
+        group: ["classId"],
+        raw: true,
+      }),
+    ]);
+
+    const studentCountMap = new Map(
+      studentCounts.map((item) => [
+        item.classId,
+        Number(item.studentCount) || 0,
+      ]),
+    );
 
     res.json(
       data.map((item) => {
         const plainItem = item.toJSON();
+
         const jurusanIds = [
           ...new Set(
-            (plainItem.Students || []).map((student) => student.jurusanId),
+            (plainItem.Students || [])
+              .map((student) => student.jurusanId)
+              .filter(Boolean),
           ),
         ];
 
-        const studentCount = (plainItem.Students || []).filter(
-          (student) => student.status === "Aktif",
-        ).length;
+        const studentCount =
+          studentCountMap.get(plainItem.id) || 0;
 
         delete plainItem.Students;
 
         return {
           ...plainItem,
-          jurusanIds: plainItem.jurusanId ? [plainItem.jurusanId] : jurusanIds,
+          jurusanIds: plainItem.jurusanId
+            ? [plainItem.jurusanId]
+            : jurusanIds,
           studentCount,
         };
       }),
@@ -73,7 +118,13 @@ async function getAll(req, res) {
 
 async function create(req, res) {
   try {
-    const { name, level, jurusanId, academicYear, status = "Aktif" } = req.body;
+    const {
+      name,
+      level,
+      jurusanId,
+      academicYear,
+      status = "Aktif",
+    } = req.body;
 
     const validationError = validateClassInput({
       name,
@@ -82,6 +133,7 @@ async function create(req, res) {
       academicYear,
       status,
     });
+
     if (validationError) {
       return res.status(400).json({
         message: validationError,
@@ -126,9 +178,13 @@ async function update(req, res) {
       academicYear: req.body.academicYear,
       status: req.body.status || data.status,
     };
+
     const validationError = validateClassInput(payload);
+
     if (validationError) {
-      return res.status(400).json({ message: validationError });
+      return res.status(400).json({
+        message: validationError,
+      });
     }
 
     await data.update(payload);
